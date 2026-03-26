@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import 'react-day-picker/style.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f1f3f5;
+  --foreground: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input:focus,
+textarea:focus,
+[contenteditable='true']:focus {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.formal-daypicker.rdp-root {
+  --rdp-accent-color: #374151;
+  --rdp-accent-background-color: #e5e7eb;
+  --rdp-day_button-border-radius: 0;
+  --rdp-day-width: 28px;
+  --rdp-day-height: 28px;
+  --rdp-day_button-width: 28px;
+  --rdp-day_button-height: 28px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.formal-daypicker .rdp-month_caption {
+  display: none;
+}
+
+.formal-daypicker .rdp-month_grid {
+  border-collapse: collapse;
+}
+
+.formal-daypicker .rdp-weekday {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.formal-daypicker .rdp-day_button {
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.formal-daypicker .rdp-day_button:hover:not([disabled]) {
+  background: #f3f4f6;
+}
+
+.formal-daypicker .rdp-selected .rdp-day_button,
+.formal-daypicker .rdp-range_start .rdp-day_button,
+.formal-daypicker .rdp-range_end .rdp-day_button {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  border-color: #374151 !important;
+}
+
+.formal-daypicker .rdp-day_button.rdp-selected,
+.formal-daypicker .rdp-day_button.rdp-range_start,
+.formal-daypicker .rdp-day_button.rdp-range_end {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  border-color: #374151 !important;
+}
+
+.formal-daypicker .rdp-range_middle .rdp-day_button {
+  background-color: #e5e7eb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+.formal-daypicker .rdp-day_button.rdp-range_middle {
+  background-color: #e5e7eb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+.formal-daypicker .rdp-chevron {
+  fill: #374151;
+}
+
+.rdp-has-data {
+  position: relative;
+}
+
+.rdp-has-data::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #6b7280;
+  transform: translateX(-50%);
+}
+
+.animate-shake {
+  animation: shake 0.35s linear;
+}
+
+@keyframes shake {
+  0% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}

@@ -1,0 +1,15 @@
+# Node
+node_modules/
+out/
+.next/
+
+# Tauri / Rust
+src-tauri/target/
+
+# OS
+.DS_Store
+
+# Local database/cache
+*.db
+*.db-shm
+*.db-wal

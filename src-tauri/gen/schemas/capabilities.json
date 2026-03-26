@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability for Water Lab Analytics","local":true,"windows":["main"],"permissions":["core:default","core:webview:allow-print","dialog:default"]}}

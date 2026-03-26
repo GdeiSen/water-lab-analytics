@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for Water Lab Analytics",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-print",
+    "dialog:default"
+  ]
+}
