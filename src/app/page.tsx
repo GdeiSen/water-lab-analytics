@@ -19,10 +19,12 @@ import { MainArea } from "@/components/layout/MainArea";
 import { RightSidebar } from "@/components/layout/RightSidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { useArchive } from "@/hooks/useArchive";
 import { useAuth } from "@/hooks/useAuth";
 import { useChartData } from "@/hooks/useChartData";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { AUTH_BYPASS_ENABLED } from "@/lib/app-config";
 import { api, isTauriRuntime, pickExportPath } from "@/lib/tauri-api";
 import type {
   ChartDataset,
@@ -55,7 +57,8 @@ interface SidebarResizeDraft {
 }
 
 export default function Page() {
-  const { session, login, logout, isLoading, error } = useAuth();
+  const { session, login, logout, isLoading, error, authBypassEnabled } =
+    useAuth();
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const resizeGuideRef = useRef<HTMLDivElement | null>(null);
   const pendingResizeRef = useRef<SidebarResizeDraft | null>(null);
@@ -552,6 +555,34 @@ export default function Page() {
   );
 
   if (!session) {
+    if (authBypassEnabled || AUTH_BYPASS_ENABLED) {
+      return (
+        <AuthProvider>
+          <div className="flex min-h-screen items-center justify-center bg-[#f1f3f5] px-4">
+            <div className="w-full max-w-md border border-ink/25 bg-white p-6 text-center">
+              <div className="mb-6 flex justify-center">
+                <Spinner size="lg" />
+              </div>
+              <p className="text-xs uppercase tracking-[0.2em] text-ink/60">
+                Система Анализатор
+              </p>
+              <h1 className="mt-2 text-xl font-semibold text-ink">
+                Запуск приложения
+              </h1>
+              <p className="mt-3 text-sm text-ink/70">
+                Авторизация выполнится автоматически.
+              </p>
+              {error && (
+                <div className="mt-4 border border-ember/50 bg-ember/10 px-3 py-2 text-sm text-ember">
+                  {error}
+                </div>
+              )}
+            </div>
+          </div>
+        </AuthProvider>
+      );
+    }
+
     return (
       <AuthProvider>
         <div className="flex min-h-screen items-center justify-center bg-[#f1f3f5] px-4">
@@ -572,10 +603,12 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="danger" onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Выход
-            </Button>
+            {!authBypassEnabled && (
+              <Button variant="danger" onClick={logout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Выход
+              </Button>
+            )}
           </div>
         </header>
 

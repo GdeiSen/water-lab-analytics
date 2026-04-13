@@ -17,12 +17,16 @@ export function FileItem({ file, selected, onClick }: FileItemProps) {
       type="button"
       onClick={onClick}
       className={clsx(
-        'flex h-10 w-full items-center justify-between gap-2 border px-2 text-left transition',
+        'w-full border px-2 py-1.5 text-left transition',
         selected ? 'border-ink bg-ink/5' : 'border-ink/10 bg-white hover:border-ink/30'
       )}
     >
-      <p className="line-clamp-1 text-[12px] font-semibold text-ink">{file.filename}</p>
-      <FileStatusBadge status={file.status} />
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 line-clamp-1 text-[12px] font-semibold text-ink">
+          {file.filename}
+        </p>
+        <FileStatusBadge status={file.status} />
+      </div>
     </button>
   );
 }

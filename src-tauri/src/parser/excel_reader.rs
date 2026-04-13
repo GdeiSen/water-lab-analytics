@@ -10,7 +10,7 @@ use crate::{
     models::{FileStatus, Measurement, ObjectValue, ParsedFile, TechnologicalObject},
     parser::{
         normalizer::NameNormalizer,
-        structure::{cell_to_string, detect_header, parse_numeric_cell, HeaderObjectColumn},
+        structure::{cell_to_string, detect_header, parse_numeric_cell},
         validator::is_service_row,
     },
 };
@@ -66,7 +66,7 @@ fn parse_sheet(
         }
 
         if test_name_raw.trim().is_empty() {
-            if row_has_object_payload(sheet, row_idx, &object_columns) {
+            if row_has_measurement_payload(sheet, row_idx) {
                 warnings.push(format!(
                     "Нарушение структуры: строка {} содержит значения по объектам без названия испытания и была пропущена",
                     row_idx + 1
@@ -132,13 +132,9 @@ fn parse_sheet(
     })
 }
 
-fn row_has_object_payload(
-    sheet: &Range<Data>,
-    row_idx: usize,
-    object_columns: &[HeaderObjectColumn],
-) -> bool {
-    object_columns.iter().any(|column| {
-        let raw = cell_to_string(sheet.get_value((row_idx as u32, column.col_idx as u32)));
+fn row_has_measurement_payload(sheet: &Range<Data>, row_idx: usize) -> bool {
+    (1..sheet.width()).any(|col_idx| {
+        let raw = cell_to_string(sheet.get_value((row_idx as u32, col_idx as u32)));
         !raw.trim().is_empty()
     })
 }
@@ -201,9 +197,7 @@ mod tests {
             Cell::new((1, 1), Data::Float(1.0)),
             Cell::new((1, 2), Data::Float(2.0)),
             Cell::new((1, 3), Data::Float(3.0)),
-            Cell::new((2, 1), Data::Float(10.0)),
-            Cell::new((2, 2), Data::Float(11.0)),
-            Cell::new((2, 3), Data::Float(12.0)),
+            Cell::new((2, 4), Data::Float(10.0)),
             Cell::new((3, 0), Data::String("Фосфор".to_string())),
             Cell::new((3, 1), Data::Float(4.0)),
             Cell::new((3, 2), Data::Float(5.0)),

@@ -4,20 +4,20 @@
 [![Release](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/release.yml/badge.svg)](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/release.yml)
 [![GitHub release](https://img.shields.io/github/v/release/GdeiSen/water-lab-analytics)](https://github.com/GdeiSen/water-lab-analytics/releases)
 
-Десктоп-приложение для анализа лабораторных данных из Excel-архивов. Проект собирается как нативное приложение на `Tauri 2`, использует `Rust` для локальной обработки и `Next.js` для интерфейса, хранит данные в `SQLite` и работает полностью на стороне пользователя.
+Desktop application for analyzing laboratory data from Excel archives. The app is built with `Tauri 2`, uses `Rust` for local processing, `Next.js` for the UI, and stores data in `SQLite`.
 
-Репозиторий: [github.com/GdeiSen/water-lab-analytics](https://github.com/GdeiSen/water-lab-analytics)
+Repository: [github.com/GdeiSen/water-lab-analytics](https://github.com/GdeiSen/water-lab-analytics)
 
-## Что умеет приложение
+## Features
 
-- импортировать и повторно сканировать архив Excel-файлов
-- кэшировать результаты парсинга и ускорять повторную обработку
-- строить временные ряды по тестам и объектам
-- показывать статистику: `min`, `max`, `avg`, `median`, `stddev`
-- экспортировать результаты и графики
-- отслеживать изменения файлов архива
+- import and rescan Excel archives
+- cache parsed data for faster repeated analysis
+- build time series by test type and object
+- show summary statistics: `min`, `max`, `avg`, `median`, `stddev`
+- export chart data and chart images
+- watch archive files for changes
 
-## Технологии
+## Stack
 
 - `Tauri 2`
 - `Rust`
@@ -28,80 +28,77 @@
 - `Recharts`
 - `SQLite`
 
-## Архитектура
+## Project structure
 
-- интерфейс: `/src`
-- desktop/backend-часть: `/src-tauri/src`
-- конфиг Tauri: `/src-tauri/tauri.conf.json`
+- frontend: `/src`
+- desktop backend: `/src-tauri/src`
+- Tauri config: `/src-tauri/tauri.conf.json`
 
-## Возможности backend
+## Backend
 
-- IPC-команды для авторизации, выбора архива, сканирования, чтения данных и экспорта
-- парсер Excel на `calamine` с нормализацией названий и поддержкой дат в имени файла
-- локальная база `SQLite` с миграциями и кэшем
-- file watcher на `notify`
-- параллельная обработка архива через `rayon`
+- IPC commands for authentication, archive selection, scanning, data access, and export
+- Excel parsing with `calamine`, including test name normalization and date parsing from filenames
+- local `SQLite` storage with migrations and cache support
+- file watching with `notify`
+- parallel archive processing with `rayon`
 
-## Возможности frontend
+## Frontend
 
-- экран авторизации и локальные пользовательские сессии
-- dashboard с фильтрами и боковыми панелями
-- интерактивные графики с управлением диапазоном дат
-- статистические summary-блоки
-- экспорт данных и изображений графика
+- login screen and local user sessions
+- dashboard with filters and side panels
+- interactive charts with date range controls
+- summary statistic cards
+- export for data and chart images
 
-## Быстрый старт
-
-### Требования
+## Requirements
 
 - `Node.js 20+`
 - `npm 10+`
 - `Rust stable`
 
-### Локальная разработка
+## Local development
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-### Production build фронтенда
+## Frontend build
 
 ```bash
 npm run build
 ```
 
-### Desktop build
+## Desktop build
 
 ```bash
 npm run tauri:build
 ```
 
-## Проверки
+## Checks
 
 ```bash
 npm run lint
+npm run typecheck
 npm run build
 cd src-tauri && cargo test
 ```
 
 ## GitHub Actions
 
-В репозитории настроены workflow'ы:
+- `CI` runs frontend checks and Rust tests on pushes and pull requests
+- `Release` builds Tauri artifacts for `macOS`, `Windows`, and `Linux` on tags matching `v*`
 
-- `CI` для проверки frontend и Rust-части на push/pull request
-- `Release` для сборки Tauri-приложения под `macOS`, `Windows` и `Linux` по git-тегу формата `v*`
-
-Первый release можно выпустить так:
+To create a release:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-## Авторизация по умолчанию
+## Default credentials
 
-- логин: `admin`
-- пароль: `admin`
+- username: `admin`
+- password: `admin`
 
-При первом запуске пользователь создаётся автоматически в локальной базе.
+The default user is created automatically on first launch.

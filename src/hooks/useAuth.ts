@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
+import { AUTH_BYPASS_CREDENTIALS, AUTH_BYPASS_ENABLED } from '@/lib/app-config';
 import { api } from '@/lib/tauri-api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useDataStore } from '@/stores/data-store';
@@ -9,6 +10,7 @@ import { useDataStore } from '@/stores/data-store';
 export function useAuth() {
   const { session, isLoading, error, setSession, setLoading, setError, clear } = useAuthStore();
   const resetData = useDataStore((state) => state.resetData);
+  const bypassAttemptedRef = useRef(false);
 
   const login = useCallback(
     async (username: string, password: string) => {
@@ -29,6 +31,15 @@ export function useAuth() {
     [setError, setLoading, setSession]
   );
 
+  useEffect(() => {
+    if (!AUTH_BYPASS_ENABLED || session || isLoading || bypassAttemptedRef.current) {
+      return;
+    }
+
+    bypassAttemptedRef.current = true;
+    void login(AUTH_BYPASS_CREDENTIALS.username, AUTH_BYPASS_CREDENTIALS.password);
+  }, [isLoading, login, session]);
+
   const logout = useCallback(async () => {
     try {
       if (session) {
@@ -44,6 +55,7 @@ export function useAuth() {
     session,
     isLoading,
     error,
+    authBypassEnabled: AUTH_BYPASS_ENABLED,
     login,
     logout
   };

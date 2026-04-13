@@ -17,7 +17,7 @@ use crate::{
     storage::database::{Database, PersistedFile},
 };
 
-const PARSER_CACHE_VERSION: &str = "2026-03-11-parser-v5-objects";
+const PARSER_CACHE_VERSION: &str = "2026-04-13-parser-v7-average-column-structure-warnings";
 
 pub fn process_archive(
     path: &Path,
