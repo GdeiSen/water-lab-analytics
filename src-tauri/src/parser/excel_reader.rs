@@ -40,7 +40,6 @@ fn parse_sheet(
     sheet: &Range<Data>,
     normalizer: &NameNormalizer,
 ) -> Result<ParsedFile, ParseError> {
-
     if sheet.height() == 0 {
         return Err(ParseError::EmptySheet);
     }
@@ -174,10 +173,7 @@ pub fn parse_date_from_filename(path: &Path) -> Result<NaiveDate, ParseError> {
 mod tests {
     use calamine::{Cell, Data, Range};
 
-    use crate::{
-        models::FileStatus,
-        parser::normalizer::NameNormalizer,
-    };
+    use crate::{models::FileStatus, parser::normalizer::NameNormalizer};
 
     use super::{parse_date_from_filename, parse_sheet};
     use std::path::Path;

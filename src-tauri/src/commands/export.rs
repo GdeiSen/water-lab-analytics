@@ -260,7 +260,10 @@ fn build_sheet_xml(payload: &ExcelExportPayload) -> String {
     }
 
     for (row_index, row) in payload.rows.iter().enumerate() {
-        rows.push(build_data_row(payload.header_rows.len() + row_index + 1, row));
+        rows.push(build_data_row(
+            payload.header_rows.len() + row_index + 1,
+            row,
+        ));
     }
 
     format!(
