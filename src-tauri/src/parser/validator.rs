@@ -1,7 +1,7 @@
 pub fn is_service_row(value: &str) -> bool {
     let normalized = value.trim().to_lowercase();
     if normalized.is_empty() {
-        return true;
+        return false;
     }
 
     const MARKERS: [&str; 10] = [

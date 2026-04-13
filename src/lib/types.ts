@@ -128,11 +128,25 @@ export interface ChartHoverSnapshot {
   statsByTest: ChartHoverTestStats[];
 }
 
+export type ChartGuideMode = 'series' | 'average';
+
 export interface ChartDataset {
   tests: ChartTest[];
   objects: ChartObject[];
   points: ChartPoint[];
   statsByTest: ChartTestStats[];
+}
+
+export type ExcelCellValue = string | number | null;
+
+export interface ExcelHeaderRow {
+  cells: string[];
+}
+
+export interface ExcelExportPayload {
+  worksheetName: string;
+  headerRows: ExcelHeaderRow[];
+  rows: ExcelCellValue[][];
 }
 
 export type ApproximationMode = 'raw' | 'moving_average' | 'ema';

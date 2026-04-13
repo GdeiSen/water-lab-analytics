@@ -8,6 +8,7 @@ import { DateRangePicker } from '@/components/filters/DateRangePicker';
 import { StatusBar } from '@/components/layout/StatusBar';
 import type {
   ChartDataset,
+  ChartGuideMode,
   ChartHoverSnapshot,
   ChartOptimizationSettings,
   DateRange,
@@ -22,10 +23,11 @@ interface MainAreaProps {
   onDateRangeChange: (range: DateRange) => void;
   chartData: ChartDataset | null;
   showAverage: boolean;
+  guideMode: ChartGuideMode;
   chartOptimization: ChartOptimizationSettings;
   parseProgress: ParseProgress | null;
   statusMessage: string | null;
-  onExportCsv: () => void;
+  onExportExcel: () => void;
   onExportPng: () => void;
   onPrintChart: () => void;
 }
@@ -38,10 +40,11 @@ export function MainArea({
   onDateRangeChange,
   chartData,
   showAverage,
+  guideMode,
   chartOptimization,
   parseProgress,
   statusMessage,
-  onExportCsv,
+  onExportExcel,
   onExportPng,
   onPrintChart
 }: MainAreaProps) {
@@ -66,6 +69,12 @@ export function MainArea({
     const rootHeight = rootRef.current?.clientHeight ?? 900;
     return { min: 220, max: Math.max(300, rootHeight - 260) };
   }
+
+  useEffect(() => {
+    if (!chartData) {
+      setHoverSnapshot(null);
+    }
+  }, [chartData]);
 
   useEffect(() => {
     if (!resizeStart) {
@@ -121,6 +130,7 @@ export function MainArea({
             selectedTestIds={selectedTestIds}
             selectedObjectKeys={selectedObjectKeys}
             showAverage={showAverage}
+            guideMode={guideMode}
             optimization={chartOptimization}
             height={chartHeight}
             onHoverChange={setHoverSnapshot}
@@ -145,7 +155,7 @@ export function MainArea({
           hoverSnapshot={hoverSnapshot}
           selectedTestIds={selectedTestIds}
           selectedObjectKeys={selectedObjectKeys}
-          onExportCsv={onExportCsv}
+          onExportExcel={onExportExcel}
         />
       </div>
       <StatusBar progress={parseProgress} message={statusMessage} />

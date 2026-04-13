@@ -20,9 +20,11 @@ export function useChartData() {
 
   useEffect(() => {
     if (!session || !archiveSummary || selectedTestIds.length === 0) {
+      setChartData(null);
       return;
     }
 
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const chart = await api.getChartData(session.token, {
@@ -32,15 +34,24 @@ export function useChartData() {
           dateFrom: dateRange.from,
           dateTo: dateRange.to
         });
+        if (cancelled) {
+          return;
+        }
         setChartData(chart);
         setStatusMessage(`Загружено точек: ${chart.points.length}`);
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         const message = error instanceof Error ? error.message : 'Не удалось загрузить данные графика';
         toast.error(message);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [
     archiveSummary,
     dateRange.from,

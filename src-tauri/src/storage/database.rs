@@ -436,12 +436,7 @@ impl Database {
         let test_filter = if requested_test_ids.is_empty() {
             None
         } else {
-            Some(
-                requested_test_ids
-                    .iter()
-                    .copied()
-                    .collect::<HashSet<i64>>(),
-            )
+            Some(requested_test_ids.iter().copied().collect::<HashSet<i64>>())
         };
         let object_filter = if requested_object_keys.is_empty() {
             None
@@ -566,10 +561,10 @@ impl Database {
             requested_test_ids
                 .into_iter()
                 .filter_map(|test_id| {
-                    test_name_map.get(&test_id).cloned().map(|test_name| ChartTest {
-                        test_id,
-                        test_name,
-                    })
+                    test_name_map
+                        .get(&test_id)
+                        .cloned()
+                        .map(|test_name| ChartTest { test_id, test_name })
                 })
                 .collect::<Vec<_>>()
         };
@@ -654,11 +649,7 @@ impl Database {
             .map(|test| ChartTestStats {
                 test_id: test.test_id,
                 test_name: test.test_name.clone(),
-                stats: calculate_stats(
-                    stats_by_test
-                        .remove(&test.test_id)
-                        .unwrap_or_default(),
-                ),
+                stats: calculate_stats(stats_by_test.remove(&test.test_id).unwrap_or_default()),
             })
             .collect::<Vec<_>>();
 

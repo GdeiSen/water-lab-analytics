@@ -56,7 +56,7 @@ const initialOptimization: ChartOptimizationSettings = {
   autoOptimize: true,
   pointCompression: 1,
   lineApproximation: 'raw',
-  averageApproximation: 'raw',
+  averageApproximation: 'moving_average',
   movingAverageWindow: 3,
   emaAlpha: 0.35,
   averageMovingAverageWindow: 5,

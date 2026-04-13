@@ -5,6 +5,7 @@ import { ChevronDown, Info } from "lucide-react";
 
 import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
 import type {
+  ChartGuideMode,
   ChartOptimizationSettings,
   TechnologicalObject,
   TestType,
@@ -21,7 +22,9 @@ interface RightSidebarProps {
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
   showAverage: boolean;
+  guideMode: ChartGuideMode;
   onToggleAverage: (show: boolean) => void;
+  onGuideModeChange: (mode: ChartGuideMode) => void;
   optimization: ChartOptimizationSettings;
   pointCount: number;
   onOptimizationChange: (next: Partial<ChartOptimizationSettings>) => void;
@@ -35,7 +38,9 @@ export function RightSidebar({
   selectedObjectKeys,
   onChangeObjects,
   showAverage,
+  guideMode,
   onToggleAverage,
+  onGuideModeChange,
   optimization,
   pointCount,
   onOptimizationChange,
@@ -86,6 +91,12 @@ export function RightSidebar({
     optimization.emaAlpha,
   ]);
 
+  useEffect(() => {
+    if (optimization.averageApproximation === "raw") {
+      onOptimizationChange({ averageApproximation: "moving_average" });
+    }
+  }, [onOptimizationChange, optimization.averageApproximation]);
+
   return (
     <aside className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-x-hidden border border-ink/20 bg-white p-3">
       <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-auto overflow-x-hidden">
@@ -107,9 +118,6 @@ export function RightSidebar({
           </div>
           {openSections.test && (
             <>
-              <p className="text-[11px] text-ink/50">
-                Выберите один или несколько параметров для построения графика.
-              </p>
               <div className="min-w-0">
                 <TestTypeSelect
                   testTypes={testTypes}
@@ -181,8 +189,10 @@ export function RightSidebar({
           </div>
           {showAverageInfo && (
             <p className="rounded border border-ink/20 bg-[#f7f8fa] px-2 py-1.5 text-[11px] text-ink/70">
-              Средняя линия строится по выбранным технологическим объектам. Если объекты не выбраны, средняя считается
-              по всем доступным объектам. Вспомогательные линии курсора используют то же значение средней.
+              Средняя линия строится по выбранным технологическим объектам. Если
+              она полностью совпадает с графиком параметра, лишняя линия
+              скрывается. Вспомогательные линии можно переключать между
+              графиками и средними значениями.
             </p>
           )}
           {openSections.average && (
@@ -192,7 +202,9 @@ export function RightSidebar({
               </p>
               <ChartControls
                 showAverage={showAverage}
+                guideMode={guideMode}
                 onToggleAverage={onToggleAverage}
+                onGuideModeChange={onGuideModeChange}
               />
 
               <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
@@ -207,7 +219,6 @@ export function RightSidebar({
                     })
                   }
                 >
-                  <option value="raw">Простая средняя</option>
                   <option value="moving_average">Скользящая средняя</option>
                   <option value="ema">EMA</option>
                 </select>

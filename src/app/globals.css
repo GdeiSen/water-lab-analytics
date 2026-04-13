@@ -148,3 +148,27 @@ textarea:focus,
     transform: translateX(0);
   }
 }
+
+.chart-print-root {
+  display: none;
+}
+
+@media print {
+  body.printing-chart-only > * {
+    display: none !important;
+  }
+
+  body.printing-chart-only .chart-print-root {
+    display: block !important;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  body.printing-chart-only .chart-print-root img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+  }
+}

@@ -1,4 +1,4 @@
-﻿use std::collections::HashSet;
+use std::collections::HashSet;
 
 use calamine::{Data, Range};
 use once_cell::sync::Lazy;
@@ -23,9 +23,7 @@ pub struct HeaderObjectColumn {
     pub col_idx: usize,
 }
 
-pub fn detect_header(
-    sheet: &Range<Data>,
-) -> Result<(usize, Vec<HeaderObjectColumn>), ParseError> {
+pub fn detect_header(sheet: &Range<Data>) -> Result<(usize, Vec<HeaderObjectColumn>), ParseError> {
     let height = sheet.height();
     let width = sheet.width();
     if height == 0 || width == 0 {
@@ -48,7 +46,11 @@ pub fn detect_header(
             match parse_object_header_cell(&raw) {
                 HeaderCellParse::Stop => break,
                 HeaderCellParse::Skip => continue,
-                HeaderCellParse::Object { key, label, numeric } => {
+                HeaderCellParse::Object {
+                    key,
+                    label,
+                    numeric,
+                } => {
                     if seen_keys.insert(key.clone()) {
                         numeric_labels += usize::from(numeric);
                         object_columns.push(HeaderObjectColumn {
@@ -301,10 +303,7 @@ mod tests {
     #[test]
     fn builds_text_key() {
         assert_eq!(canonical_object_key("tank #1"), "1".to_string());
-        assert_eq!(
-            canonical_object_key("main grate"),
-            "main_grate".to_string()
-        );
+        assert_eq!(canonical_object_key("main grate"), "main_grate".to_string());
     }
 
     #[test]
@@ -313,4 +312,3 @@ mod tests {
         assert!(matches!(parsed, HeaderCellParse::Object { .. }));
     }
 }
-

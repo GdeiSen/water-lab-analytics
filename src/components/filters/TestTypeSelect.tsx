@@ -19,9 +19,6 @@ export function TestTypeSelect({
 
   function toggleTest(testId: number) {
     if (selectedTestIds.includes(testId)) {
-      if (selectedTestIds.length <= 1) {
-        return;
-      }
       onChange(selectedTestIds.filter((id) => id !== testId));
       return;
     }
@@ -39,6 +36,21 @@ export function TestTypeSelect({
 
   return (
     <div className="max-h-52 overflow-auto border border-ink/30 bg-white p-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2 border-b border-ink/10 px-1.5 pb-1.5">
+        <span className="text-[11px] uppercase tracking-wide text-ink/45">
+          {selectedTestIds.length === 0
+            ? "Ничего не выбрано"
+            : `Выбрано: ${selectedTestIds.length}`}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange([])}
+          disabled={selectedTestIds.length === 0}
+          className="text-[11px] font-medium text-ink/70 transition hover:text-ink disabled:cursor-not-allowed disabled:text-ink/30"
+        >
+          Снять все
+        </button>
+      </div>
       <div className="space-y-1">
         {sorted.map((test) => (
           <label

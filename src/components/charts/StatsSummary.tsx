@@ -12,7 +12,7 @@ interface StatsSummaryProps {
   hoverSnapshot: ChartHoverSnapshot | null;
   selectedTestIds: number[];
   selectedObjectKeys: string[];
-  onExportCsv: () => void;
+  onExportExcel: () => void;
 }
 
 interface TableColumn {
@@ -38,7 +38,7 @@ export function StatsSummary({
   hoverSnapshot,
   selectedTestIds,
   selectedObjectKeys,
-  onExportCsv
+  onExportExcel
 }: StatsSummaryProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -280,14 +280,14 @@ export function StatsSummary({
       >
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/60">
-            {'\u0422\u0430\u0431\u043b\u0438\u0446\u0430 \u043f\u043e \u0434\u0430\u0442\u0430\u043c \u0438 \u043f\u0440\u043e\u043c\u044b\u0448\u043b\u0435\u043d\u043d\u044b\u043c \u043e\u0431\u044a\u0435\u043a\u0442\u0430\u043c'}
+            {'\u0422\u0430\u0431\u043b\u0438\u0447\u043d\u043e\u0435 \u043f\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0438\u0435'}
           </p>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onExportCsv}
+              onClick={onExportExcel}
               className="flex h-8 w-8 items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink"
-              title="Export selected table data to CSV"
+              title="Экспортировать таблицу в Excel"
             >
               <FileDown className="h-4 w-4" />
             </button>

@@ -23,7 +23,15 @@ import { useArchive } from "@/hooks/useArchive";
 import { useAuth } from "@/hooks/useAuth";
 import { useChartData } from "@/hooks/useChartData";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
-import { api } from "@/lib/tauri-api";
+import { api, isTauriRuntime, pickExportPath } from "@/lib/tauri-api";
+import type {
+  ChartDataset,
+  ChartObject,
+  ChartTest,
+  ChartGuideMode,
+  ExcelCellValue,
+  ExcelExportPayload,
+} from "@/lib/types";
 import { useDataStore } from "@/stores/data-store";
 
 const MIN_SIDEBAR_WIDTH = 240;
@@ -56,6 +64,7 @@ export default function Page() {
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [guideMode, setGuideMode] = useState<ChartGuideMode>("series");
   const [sidebarResize, setSidebarResize] = useState<SidebarResizeState | null>(
     null,
   );
@@ -217,6 +226,9 @@ export default function Page() {
 
   const effectiveSelectedTestIds = useMemo(() => {
     const available = new Set(testTypes.map((item) => item.id));
+    if (selectedTestIds.length === 0) {
+      return [];
+    }
     const filtered = selectedTestIds.filter((id) => available.has(id));
     if (filtered.length > 0) {
       return filtered;
@@ -237,82 +249,100 @@ export default function Page() {
     [login, setStatusMessage],
   );
 
-  const handleExportCsv = useCallback(() => {
-    if (!chartData) {
-      toast.error("Нет данных для экспорта");
-      return;
+  useEffect(() => {
+    if (!showAverage && guideMode === "average") {
+      setGuideMode("series");
     }
+  }, [guideMode, showAverage]);
 
-    const tests = chartData.tests.filter((test) =>
-      effectiveSelectedTestIds.includes(test.testId),
-    );
-    const objects = chartData.objects.filter((object) =>
-      effectiveSelectedObjectKeys.includes(object.objectKey),
-    );
-
-    const headers = ["date"];
-    for (const test of tests) {
-      for (const object of objects) {
-        headers.push(`${test.testName} / ${object.objectLabel}`);
+  const handleExportExcel = useCallback(() => {
+    void (async () => {
+      if (!chartData) {
+        toast.error("Нет данных для экспорта");
+        return;
       }
-      headers.push(`${test.testName} / Среднее`);
-    }
 
-    const rows = chartData.points.map((point) => {
-      const row = [point.date];
-      for (const test of tests) {
-        for (const object of objects) {
-          const value =
-            point.values.find(
-              (item) =>
-                item.testId === test.testId &&
-                item.objectKey === object.objectKey,
-            )?.value ?? null;
-          row.push(value === null || value === undefined ? "" : String(value));
+      const payload = buildChartExcelPayload(
+        chartData,
+        effectiveSelectedTestIds,
+        effectiveSelectedObjectKeys,
+      );
+
+      try {
+        if (session && isTauriRuntime()) {
+          const fileName = buildExportDefaultName("chart_export", "xlsx");
+          const targetPath = await pickExportPath("Сохранить Excel", fileName, [
+            { name: "Excel", extensions: ["xlsx"] },
+          ]);
+          if (!targetPath) {
+            return;
+          }
+
+          await api.saveExcelExport(session.token, targetPath, payload);
+          toast.success("Excel экспортирован");
+          return;
         }
-        const avg =
-          point.averages.find((item) => item.testId === test.testId)?.value ??
-          null;
-        row.push(avg === null || avg === undefined ? "" : String(avg));
+
+        const fileName = buildExportDefaultName("chart_export", "xls");
+        const blob = new Blob([buildBrowserExcelDocument(payload)], {
+          type: "application/vnd.ms-excel;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast.success("Excel экспортирован");
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Не удалось экспортировать Excel";
+        toast.error(message);
       }
-      return row.map(escapeCsvCell).join(",");
-    });
+    })();
+  }, [chartData, effectiveSelectedObjectKeys, effectiveSelectedTestIds, session]);
 
-    const csv = [[...headers].map(escapeCsvCell).join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+  const handleExportPng = useCallback(() => {
+    void (async () => {
+      const element = document.getElementById("time-series-chart");
+      if (!element) {
+        toast.error("График не найден");
+        return;
+      }
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `chart_export.csv`;
-    link.click();
+      try {
+        const png = await toPng(element, { cacheBust: true, pixelRatio: 2 });
+        const fileName = buildExportDefaultName("chart", "png");
 
-    URL.revokeObjectURL(url);
-    toast.success("CSV экспортирован");
-  }, [chartData, effectiveSelectedObjectKeys, effectiveSelectedTestIds]);
+        if (session && isTauriRuntime()) {
+          const targetPath = await pickExportPath("Сохранить PNG", fileName, [
+            { name: "PNG", extensions: ["png"] },
+          ]);
+          if (!targetPath) {
+            return;
+          }
 
-  const handleExportPng = useCallback(async () => {
-    const element = document.getElementById("time-series-chart");
-    if (!element) {
-      toast.error("График не найден");
-      return;
-    }
+          const bytes = Array.from(dataUrlToBytes(png));
+          await api.saveExportFile(session.token, targetPath, bytes);
+        } else {
+          const link = document.createElement("a");
+          link.href = png;
+          link.download = fileName;
+          link.click();
+        }
 
-    try {
-      const png = await toPng(element, { cacheBust: true, pixelRatio: 2 });
-      const link = document.createElement("a");
-      link.href = png;
-      link.download = "chart.png";
-      link.click();
-      toast.success("PNG экспортирован");
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Не удалось экспортировать PNG";
-      toast.error(message);
-    }
-  }, []);
+        toast.success("PNG экспортирован");
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Не удалось экспортировать PNG";
+        toast.error(message);
+      }
+    })();
+  }, [session]);
 
   const handlePrintChart = useCallback(async () => {
     const element = document.getElementById("time-series-chart");
@@ -323,60 +353,35 @@ export default function Page() {
 
     try {
       const png = await toPng(element, { cacheBust: true, pixelRatio: 2 });
-      const iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.style.visibility = "hidden";
+      const printRoot = document.createElement("div");
+      printRoot.className = "chart-print-root";
+      printRoot.innerHTML = `<img src="${png}" alt="Chart print" />`;
+      document.body.appendChild(printRoot);
+      document.body.classList.add("printing-chart-only");
 
-      document.body.appendChild(iframe);
-
+      let cleaned = false;
       const cleanup = () => {
-        iframe.remove();
-      };
-
-      const frameWindow = iframe.contentWindow;
-      const frameDocument = iframe.contentDocument ?? frameWindow?.document;
-      if (!frameWindow || !frameDocument) {
-        cleanup();
-        toast.error("Не удалось инициализировать печать");
-        return;
-      }
-
-      frameDocument.open();
-      frameDocument.write(
-        `<!doctype html><html><head><title>Chart Print</title><style>html,body{margin:0;padding:0;background:#fff}img{display:block;max-width:100vw;width:100%;height:auto}</style></head><body><img id="chart-print-image" src="${png}" alt="Chart" /></body></html>`,
-      );
-      frameDocument.close();
-
-      const runPrint = () => {
-        try {
-          frameWindow.focus();
-          frameWindow.print();
-        } finally {
-          setTimeout(cleanup, 1200);
+        if (cleaned) {
+          return;
         }
+        cleaned = true;
+        document.body.classList.remove("printing-chart-only");
+        printRoot.remove();
       };
 
-      const image = frameDocument.getElementById(
-        "chart-print-image",
-      ) as HTMLImageElement | null;
-      if (!image) {
-        runPrint();
-        return;
-      }
+      const onAfterPrint = () => cleanup();
+      window.addEventListener("afterprint", onAfterPrint, { once: true });
 
-      if (image.complete) {
-        runPrint();
-        return;
-      }
+      setTimeout(() => {
+        try {
+          window.print();
+        } catch {
+          cleanup();
+          toast.error("Не удалось открыть диалог печати");
+        }
+      }, 0);
 
-      image.onload = runPrint;
-      image.onerror = runPrint;
+      setTimeout(cleanup, 15000);
     } catch (error) {
       const message =
         error instanceof Error
@@ -644,10 +649,11 @@ export default function Page() {
             onDateRangeChange={setDateRange}
             chartData={chartData}
             showAverage={showAverage}
+            guideMode={guideMode}
             chartOptimization={chartOptimization}
             parseProgress={parseProgress}
             statusMessage={statusMessage}
-            onExportCsv={handleExportCsv}
+            onExportExcel={handleExportExcel}
             onExportPng={handleExportPng}
             onPrintChart={handlePrintChart}
           />
@@ -678,7 +684,9 @@ export default function Page() {
               selectedObjectKeys={effectiveSelectedObjectKeys}
               onChangeObjects={setSelectedObjectKeys}
               showAverage={showAverage}
+              guideMode={guideMode}
               onToggleAverage={setShowAverage}
+              onGuideModeChange={setGuideMode}
               optimization={chartOptimization}
               pointCount={chartData?.points.length ?? 0}
               onOptimizationChange={setChartOptimization}
@@ -725,10 +733,141 @@ function resolveResizeDraft(
   };
 }
 
-function escapeCsvCell(value: string): string {
-  if (value.includes('"') || value.includes(",") || value.includes("\n")) {
-    return `"${value.replaceAll('"', '""')}"`;
+function buildExportDefaultName(prefix: string, extension: string): string {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  const minute = String(now.getMinutes()).padStart(2, "0");
+  const second = String(now.getSeconds()).padStart(2, "0");
+
+  return `${prefix}_${year}${month}${day}_${hour}${minute}${second}.${extension}`;
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const commaIndex = dataUrl.indexOf(",");
+  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
   }
-  return value;
+
+  return bytes;
+}
+
+function buildChartExcelPayload(
+  chartData: ChartDataset,
+  selectedTestIds: number[],
+  selectedObjectKeys: string[],
+): ExcelExportPayload {
+  const tests =
+    selectedTestIds.length === 0
+      ? chartData.tests
+      : chartData.tests.filter((test) => selectedTestIds.includes(test.testId));
+  const objects =
+    selectedObjectKeys.length === 0
+      ? chartData.objects
+      : chartData.objects.filter((object) =>
+          selectedObjectKeys.includes(object.objectKey),
+        );
+
+  const headerRows = buildExcelHeaderRows(tests, objects);
+
+  const rows = chartData.points.map((point) => {
+    const row: ExcelCellValue[] = [point.date];
+
+    for (const test of tests) {
+      for (const object of objects) {
+        const value =
+          point.values.find(
+            (item) =>
+              item.testId === test.testId && item.objectKey === object.objectKey,
+          )?.value ?? null;
+        row.push(value);
+      }
+    }
+
+    return row;
+  });
+
+  return {
+    worksheetName: "Параметры",
+    headerRows,
+    rows,
+  };
+}
+
+function buildBrowserExcelDocument(payload: ExcelExportPayload): string {
+  const headerRows = payload.headerRows
+    .map(
+      (row) =>
+        `<tr>${row.cells
+          .map((cell) => `<th>${escapeHtml(String(cell))}</th>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+  const bodyRows = payload.rows
+    .map(
+      (row) =>
+        `<tr>${row
+          .map((cell) => `<td>${escapeHtml(formatExcelCell(cell))}</td>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+
+  return [
+    "<html>",
+    "<head>",
+    '<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />',
+    `<meta name="ProgId" content="Excel.Sheet" />`,
+    "</head>",
+    "<body>",
+    '<table border="1">',
+    `<thead>${headerRows}</thead>`,
+    `<tbody>${bodyRows}</tbody>`,
+    "</table>",
+    "</body>",
+    "</html>",
+  ].join("");
+}
+
+function formatExcelCell(value: ExcelCellValue): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value);
+}
+
+function buildExcelHeaderRows(
+  tests: ChartTest[],
+  objects: ChartObject[],
+): ExcelExportPayload["headerRows"] {
+  if (objects.length === 0) {
+    return [
+      {
+        cells: ["Дата", ...tests.map((test) => test.testName)],
+      },
+    ];
+  }
+
+  return [
+    {
+      cells: ["Дата", ...tests.flatMap((test) => objects.map(() => test.testName))],
+    },
+    {
+      cells: ["", ...tests.flatMap(() => objects.map((object) => object.objectLabel))],
+    },
+  ];
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 

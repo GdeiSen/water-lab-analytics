@@ -13,16 +13,16 @@ export const STATUS_LABELS: Record<string, string> = {
 };
 
 export const TANK_COLORS = [
-  '#0B7A75',
-  '#2A9D8F',
-  '#E76F51',
-  '#264653',
-  '#E9C46A',
-  '#287271',
-  '#1D3557',
-  '#C05621',
-  '#7A5C61',
-  '#5E60CE'
+  '#0072B2',
+  '#D55E00',
+  '#009E73',
+  '#7B2CBF',
+  '#CC79A7',
+  '#1D4ED8',
+  '#B45309',
+  '#0F766E',
+  '#BE123C',
+  '#374151'
 ];
 
 export function formatDate(date: string): string {

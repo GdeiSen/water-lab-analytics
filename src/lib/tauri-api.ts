@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 
 import type {
   ArchiveSummary,
   AuthToken,
   ChartDataset,
   ChartQuery,
+  ExcelExportPayload,
   FileChangedEvent,
   FileDetails,
   FileErrorEvent,
@@ -18,6 +19,8 @@ import type {
 const isTauri = () =>
   typeof window !== 'undefined' && Object.prototype.hasOwnProperty.call(window, '__TAURI_INTERNALS__');
 
+export const isTauriRuntime = () => isTauri();
+
 function assertTauri() {
   if (!isTauri()) {
     throw new Error('Команда доступна только внутри Tauri окружения');
@@ -26,10 +29,36 @@ function assertTauri() {
 
 export async function pickArchiveFolder(): Promise<string | null> {
   assertTauri();
-  const selection = await open({ directory: true, multiple: false, title: 'Выберите директорию архива' });
+  const selection = await open({
+    directory: true,
+    multiple: false,
+    title: 'Выберите директорию архива'
+  });
+
   if (!selection) {
     return null;
   }
+
+  return Array.isArray(selection) ? selection[0] : selection;
+}
+
+export async function pickExportPath(
+  title: string,
+  defaultPath: string,
+  filters: Array<{ name: string; extensions: string[] }>
+): Promise<string | null> {
+  assertTauri();
+
+  const selection = await save({
+    title,
+    defaultPath,
+    filters
+  });
+
+  if (!selection) {
+    return null;
+  }
+
   return Array.isArray(selection) ? selection[0] : selection;
 }
 
@@ -101,6 +130,20 @@ export const api = {
   async setSetting(sessionToken: string, key: string, value: string): Promise<void> {
     assertTauri();
     await invoke('set_setting', { sessionToken, key, value });
+  },
+
+  async saveExportFile(sessionToken: string, targetPath: string, bytes: number[]): Promise<void> {
+    assertTauri();
+    await invoke('save_export_file', { sessionToken, targetPath, bytes });
+  },
+
+  async saveExcelExport(
+    sessionToken: string,
+    targetPath: string,
+    payload: ExcelExportPayload
+  ): Promise<void> {
+    assertTauri();
+    await invoke('save_excel_export', { sessionToken, targetPath, payload });
   },
 
   async onParseProgress(handler: (payload: ParseProgress) => void): Promise<UnlistenFn> {

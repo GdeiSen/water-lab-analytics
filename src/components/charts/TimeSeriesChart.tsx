@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -25,6 +25,7 @@ import { format, parseISO } from "date-fns";
 import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
 import type {
   ChartDataset,
+  ChartGuideMode,
   ChartHoverSnapshot,
   ChartHoverTestStats,
   ChartOptimizationSettings,
@@ -38,6 +39,7 @@ interface TimeSeriesChartProps {
   selectedTestIds: number[];
   selectedObjectKeys: string[];
   showAverage: boolean;
+  guideMode: ChartGuideMode;
   optimization: ChartOptimizationSettings;
   height: number;
   onHoverChange?: (snapshot: ChartHoverSnapshot | null) => void;
@@ -99,6 +101,20 @@ interface GuideFrame {
   plotHeight: number;
 }
 
+interface HoverGuideState {
+  date: string;
+  averageByTest: Record<number, number | null>;
+  seriesByKey: Record<string, number | null>;
+}
+
+interface GuideValueSpec {
+  key: string;
+  axisId: string;
+  value: number;
+  color: string;
+  dashArray?: string;
+}
+
 const AXIS_WIDTH = 36;
 const AXIS_STROKE = "#6b7280";
 const AXIS_TO_PLOT_GAP = 10;
@@ -114,6 +130,7 @@ export function TimeSeriesChart({
   selectedTestIds,
   selectedObjectKeys,
   showAverage,
+  guideMode,
   optimization,
   height,
   onHoverChange,
@@ -122,14 +139,8 @@ export function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartViewportRef = useRef<HTMLDivElement | null>(null);
-  const [hoverGuide, setHoverGuide] = useState<{
-    date: string;
-    cursorByTest: Record<number, number | null>;
-  } | null>(null);
-  const [lockedGuide, setLockedGuide] = useState<{
-    date: string;
-    cursorByTest: Record<number, number | null>;
-  } | null>(null);
+  const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
+  const [lockedGuide, setLockedGuide] = useState<HoverGuideState | null>(null);
   const [hoverFrame, setHoverFrame] = useState<GuideFrame | null>(null);
   const [lockedFrame, setLockedFrame] = useState<GuideFrame | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -138,6 +149,15 @@ export function TimeSeriesChart({
   const [axisTickCounts, setAxisTickCounts] = useState<Record<string, number>>(
     {},
   );
+
+  const clearInteractions = useCallback(() => {
+    setHoverGuide(null);
+    setLockedGuide(null);
+    setHoverFrame(null);
+    setLockedFrame(null);
+    setHoveredAxisId(null);
+    onHoverChange?.(null);
+  }, [onHoverChange]);
 
   const selectedTests = useMemo(() => {
     if (!data) {
@@ -290,6 +310,24 @@ export function TimeSeriesChart({
     return map;
   }, [prepared.series]);
 
+  const visibleAverageTestIds = useMemo(() => {
+    const visible = new Set<number>();
+
+    for (const test of prepared.tests) {
+      const averageKey = getAverageKey(test.testId);
+      const seriesKeys = seriesByTest.get(test.testId) ?? [];
+      const duplicatesSeries = seriesKeys.some((seriesKey) =>
+        seriesMatches(prepared.rows, averageKey, seriesKey),
+      );
+
+      if (!duplicatesSeries) {
+        visible.add(test.testId);
+      }
+    }
+
+    return visible;
+  }, [prepared.rows, prepared.tests, seriesByTest]);
+
   const axisLayout = useMemo(() => {
     const grouped = new Map<
       string,
@@ -301,7 +339,7 @@ export function TimeSeriesChart({
 
     for (const test of prepared.tests) {
       const keys = [...(seriesByTest.get(test.testId) ?? [])];
-      if (showAverage) {
+      if (showAverage && visibleAverageTestIds.has(test.testId)) {
         keys.push(getAverageKey(test.testId));
       }
       if (keys.length === 0) {
@@ -356,7 +394,13 @@ export function TimeSeriesChart({
       leftCount: leftIndex,
       rightCount: 0,
     };
-  }, [prepared.rows, prepared.tests, seriesByTest, showAverage]);
+  }, [
+    prepared.rows,
+    prepared.tests,
+    seriesByTest,
+    showAverage,
+    visibleAverageTestIds,
+  ]);
 
   useEffect(() => {
     const availableAxisIds = new Set(
@@ -415,6 +459,12 @@ export function TimeSeriesChart({
     };
   }, [isPseudoFullscreen]);
 
+  useEffect(() => {
+    if (!data || selectedTestIds.length === 0) {
+      clearInteractions();
+    }
+  }, [clearInteractions, data, selectedTestIds.length]);
+
   if (
     !data ||
     prepared.rows.length === 0 ||
@@ -435,6 +485,30 @@ export function TimeSeriesChart({
   const activeGuide = lockedGuide ?? hoverGuide;
   const activeFrame = lockedFrame ?? hoverFrame;
   const fallbackAxisId = axisLayout.groups[0]?.axisId ?? "axis_fallback";
+  const activeGuideSpecs = activeGuide
+    ? buildGuideValueSpecs({
+        guide: activeGuide,
+        guideMode,
+        series: prepared.series,
+        tests: prepared.tests,
+        axisByTest: axisLayout.axisByTest,
+        testColorById,
+        fallbackAxisId,
+        showAverage,
+      })
+    : [];
+  const lockedGuideSpecs = lockedGuide
+    ? buildGuideValueSpecs({
+        guide: lockedGuide,
+        guideMode,
+        series: prepared.series,
+        tests: prepared.tests,
+        axisByTest: axisLayout.axisByTest,
+        testColorById,
+        fallbackAxisId,
+        showAverage,
+      })
+    : [];
   const isExpanded = isFullscreen || isPseudoFullscreen;
   const axisViewportHeight = chartViewportRef.current?.clientHeight ?? height;
   const axisPlotTop = 8;
@@ -559,10 +633,16 @@ export function TimeSeriesChart({
       cursorByTest[item.testId] = item.cursorValue;
     }
 
+    const seriesByKey: Record<string, number | null> = {};
+    for (const series of prepared.series) {
+      seriesByKey[series.key] = toNullableNumber(row[series.key]);
+    }
+
     return {
       guide: {
         date: String(row.date),
-        cursorByTest,
+        averageByTest: cursorByTest,
+        seriesByKey,
       },
       snapshot: {
         date: String(row.date),
@@ -728,24 +808,26 @@ export function TimeSeriesChart({
 
               {showAverage &&
                 prepared.tests.map((test) => (
-                  <Line
-                    key={`avg-${test.testId}`}
-                    yAxisId={
-                      axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
-                    }
-                    type="monotone"
-                    dataKey={getAverageKey(test.testId)}
-                    name={`${test.testName} (среднее)`}
-                    stroke={darkenColor(
-                      testColorById.get(test.testId) ?? "#0f766e",
-                      0.22,
-                    )}
-                    strokeDasharray="6 4"
-                    dot={false}
-                    isAnimationActive
-                    strokeWidth={2.2}
-                    connectNulls
-                  />
+                  visibleAverageTestIds.has(test.testId) ? (
+                    <Line
+                      key={`avg-${test.testId}`}
+                      yAxisId={
+                        axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
+                      }
+                      type="monotone"
+                      dataKey={getAverageKey(test.testId)}
+                      name={`${test.testName} (среднее)`}
+                      stroke={darkenColor(
+                        testColorById.get(test.testId) ?? "#0f766e",
+                        0.22,
+                      )}
+                      strokeDasharray="6 4"
+                      dot={false}
+                      isAnimationActive
+                      strokeWidth={2.2}
+                      connectNulls
+                    />
+                  ) : null
                 ))}
 
               {activeGuide && (
@@ -766,28 +848,20 @@ export function TimeSeriesChart({
               )}
 
               {lockedGuide &&
-                prepared.tests.map((test) => {
-                  const value = lockedGuide.cursorByTest[test.testId];
-                  if (typeof value !== "number" || !Number.isFinite(value)) {
-                    return null;
-                  }
-                  return (
-                    <ReferenceDot
-                      key={`locked-dot-${test.testId}`}
-                      yAxisId={
-                        axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
-                      }
-                      x={lockedGuide.date}
-                      y={value}
-                      r={3.5}
-                      fill="#b91c1c"
-                      stroke="#ffffff"
-                      strokeWidth={1}
-                      ifOverflow="extendDomain"
-                      isFront
-                    />
-                  );
-                })}
+                lockedGuideSpecs.map((guide) => (
+                  <ReferenceDot
+                    key={`locked-dot-${guide.key}`}
+                    yAxisId={guide.axisId}
+                    x={lockedGuide.date}
+                    y={guide.value}
+                    r={3.5}
+                    fill={guide.color}
+                    stroke="#ffffff"
+                    strokeWidth={1}
+                    ifOverflow="extendDomain"
+                    isFront
+                  />
+                ))}
 
               <Customized
                 component={(chartProps: unknown) => {
@@ -819,32 +893,23 @@ export function TimeSeriesChart({
 
                   return (
                     <g>
-                      {prepared.tests.map((test) => {
-                        const value = activeGuide.cursorByTest[test.testId];
-                        if (
-                          typeof value !== "number" ||
-                          !Number.isFinite(value)
-                        ) {
+                      {activeGuideSpecs.map((guide) => {
+                        const axisGroup = axisLayout.groups.find(
+                          (item) => item.axisId === guide.axisId,
+                        );
+                        if (!axisGroup) {
                           return null;
                         }
 
-                        const axisId = axisLayout.axisByTest.get(test.testId);
-                        const axisGroup = axisId
-                          ? axisLayout.groups.find(
-                              (item) => item.axisId === axisId,
-                            )
-                          : null;
-                        if (!axisId || !axisGroup) {
-                          return null;
-                        }
-
-                        const scaledY = yAxisMap?.[axisId]?.scale?.(value);
+                        const scaledY = yAxisMap?.[guide.axisId]?.scale?.(
+                          guide.value,
+                        );
                         const y =
                           typeof scaledY === "number" &&
                           Number.isFinite(scaledY)
                             ? scaledY
                             : valueToPixel(
-                                value,
+                                guide.value,
                                 axisGroup.domain,
                                 plotTop,
                                 plotHeight,
@@ -853,7 +918,7 @@ export function TimeSeriesChart({
                         const axisLineX =
                           activeFrame.plotLeft -
                           axisGroup.sideIndex * AXIS_WIDTH;
-                        const textLabel = value.toFixed(1);
+                        const textLabel = formatGuideValue(guide.value);
                         const textX = axisLineX - 1;
                         const textY = clamp(
                           y,
@@ -870,14 +935,14 @@ export function TimeSeriesChart({
                         const labelY = textY - labelHeight / 2;
 
                         return (
-                          <g key={`guide-overlay-${test.testId}`}>
+                          <g key={`guide-overlay-${guide.key}`}>
                             <line
                               x1={leftMostAxisX}
                               y1={y}
                               x2={activeFrame.cursorX}
                               y2={y}
-                              stroke="#b91c1c"
-                              strokeDasharray="4 4"
+                              stroke={guide.color}
+                              strokeDasharray={guide.dashArray}
                               strokeOpacity={0.65}
                               strokeWidth={1}
                             />
@@ -898,7 +963,7 @@ export function TimeSeriesChart({
                               fontSize={10}
                               fontWeight={600}
                               fontFamily="'IBM Plex Mono', monospace"
-                              fill="#b91c1c"
+                              fill={guide.color}
                             >
                               {textLabel}
                             </text>
@@ -1161,6 +1226,92 @@ function normalizeDomainValue(value: number): number {
   return Number.parseFloat(value.toPrecision(12));
 }
 
+function buildGuideValueSpecs({
+  guide,
+  guideMode,
+  series,
+  tests,
+  axisByTest,
+  testColorById,
+  fallbackAxisId,
+  showAverage,
+}: {
+  guide: HoverGuideState;
+  guideMode: ChartGuideMode;
+  series: SeriesMeta[];
+  tests: ChartTest[];
+  axisByTest: Map<number, string>;
+  testColorById: Map<number, string>;
+  fallbackAxisId: string;
+  showAverage: boolean;
+}): GuideValueSpec[] {
+  const seriesSpecs = series.flatMap((item) => {
+    const value = guide.seriesByKey[item.key];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return [];
+    }
+
+    return [
+      {
+        key: item.key,
+        axisId: axisByTest.get(item.testId) ?? fallbackAxisId,
+        value,
+        color: item.color,
+      } satisfies GuideValueSpec,
+    ];
+  });
+
+  if (guideMode === "series" && seriesSpecs.length > 0) {
+    return seriesSpecs;
+  }
+
+  if (!showAverage) {
+    return seriesSpecs;
+  }
+
+  const averageSpecs = tests.flatMap((test) => {
+    const value = guide.averageByTest[test.testId];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return [];
+    }
+
+    return [
+      {
+        key: `average_${test.testId}`,
+        axisId: axisByTest.get(test.testId) ?? fallbackAxisId,
+        value,
+        color: darkenColor(testColorById.get(test.testId) ?? "#0f766e", 0.22),
+        dashArray: "4 4",
+      } satisfies GuideValueSpec,
+    ];
+  });
+
+  return averageSpecs.length > 0 ? averageSpecs : seriesSpecs;
+}
+
+function seriesMatches(rows: ChartRow[], leftKey: string, rightKey: string): boolean {
+  let comparablePoints = 0;
+
+  for (const row of rows) {
+    const leftValue = toNullableNumber(row[leftKey]);
+    const rightValue = toNullableNumber(row[rightKey]);
+
+    if (leftValue === null && rightValue === null) {
+      continue;
+    }
+    if (leftValue === null || rightValue === null) {
+      return false;
+    }
+    if (Math.abs(leftValue - rightValue) > 1e-9) {
+      return false;
+    }
+
+    comparablePoints += 1;
+  }
+
+  return comparablePoints > 0;
+}
+
 function darkenColor(hexColor: string, ratio: number): string {
   const color = hexColor.trim().replace("#", "");
   if (!/^[0-9a-fA-F]{6}$/.test(color)) {
@@ -1316,6 +1467,16 @@ function ema(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function formatGuideValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+
+  const absolute = Math.abs(value);
+  const digits = absolute >= 100 ? 1 : absolute >= 10 ? 2 : 3;
+  return Number(value.toFixed(digits)).toString();
 }
 
 function formatXAxisDate(value: string): string {

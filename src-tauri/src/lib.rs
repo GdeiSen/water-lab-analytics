@@ -109,6 +109,8 @@ pub fn run() {
             commands::data::get_chart_data,
             commands::data::get_test_types,
             commands::data::get_file_details,
+            commands::export::save_export_file,
+            commands::export::save_excel_export,
             commands::auth::login,
             commands::auth::logout,
             commands::auth::whoami,

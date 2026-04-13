@@ -1,59 +1,107 @@
-# Water Lab Analytics (Tauri + Next.js)
+# Water Lab Analytics
 
-Десктоп-приложение для парсинга Excel-архива лабораторных данных, локального кэширования в SQLite и визуализации аналитики по танкам.
+[![CI](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/ci.yml)
+[![Release](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/release.yml/badge.svg)](https://github.com/GdeiSen/water-lab-analytics/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/GdeiSen/water-lab-analytics)](https://github.com/GdeiSen/water-lab-analytics/releases)
 
-## Реализовано
+Десктоп-приложение для анализа лабораторных данных из Excel-архивов. Проект собирается как нативное приложение на `Tauri 2`, использует `Rust` для локальной обработки и `Next.js` для интерфейса, хранит данные в `SQLite` и работает полностью на стороне пользователя.
 
-- `Tauri 2 + Rust` backend с IPC командами:
-  - `login/logout/whoami`
-  - `select_archive`, `rescan_archive`, `get_file_list`
-  - `get_test_types`, `get_chart_data`, `get_file_details`
-  - `get_setting`, `set_setting`, `get_last_archive_path`
-- Парсер Excel на `calamine`:
-  - динамический поиск строки заголовка с танками
-  - поддержка дат в имени `DD_MM_YYYY` и `DD.MM.YYYY`
-  - нормализация названий тестов + алиасы (`aliases.json`)
-  - warning/error классификация
-- Параллельная обработка архива (`rayon`) + SHA-256 кэш
-- SQLite слой (`rusqlite`) с миграциями и индексами
-- File watcher (`notify`) + Tauri events:
-  - `parse:progress`
-  - `parse:complete`
-  - `file:changed`
-  - `file:error`
-- Frontend (`Next.js + TypeScript + Tailwind + Zustand + Recharts`):
-  - `LoginScreen`
-  - Dashboard с правым sidebar
-  - фильтр файлов, детали файла, счётчики статусов
-  - интерактивный график, brush/zoom, выбор танков
-  - DateRangePicker (пресеты, ручной ввод, двойной календарь, range slider)
-  - статистика (min/max/avg/median/stddev)
-  - экспорт CSV и PNG
+Репозиторий: [github.com/GdeiSen/water-lab-analytics](https://github.com/GdeiSen/water-lab-analytics)
 
-## Структура
+## Что умеет приложение
 
-- Frontend: `src/`
-- Backend: `src-tauri/src/`
+- импортировать и повторно сканировать архив Excel-файлов
+- кэшировать результаты парсинга и ускорять повторную обработку
+- строить временные ряды по тестам и объектам
+- показывать статистику: `min`, `max`, `avg`, `median`, `stddev`
+- экспортировать результаты и графики
+- отслеживать изменения файлов архива
 
-## Локальный запуск
+## Технологии
 
-1. Установить Node.js 20+ и npm.
-2. Установить Rust toolchain (stable).
-3. Установить зависимости:
-   - `npm install`
-4. Запустить приложение:
-   - `npm run tauri:dev`
+- `Tauri 2`
+- `Rust`
+- `Next.js 14`
+- `TypeScript`
+- `Tailwind CSS`
+- `Zustand`
+- `Recharts`
+- `SQLite`
 
-## Дефолтная авторизация
+## Архитектура
 
-- Логин: `admin`
-- Пароль: `admin`
+- интерфейс: `/src`
+- desktop/backend-часть: `/src-tauri/src`
+- конфиг Tauri: `/src-tauri/tauri.conf.json`
 
-На первом запуске пользователь создаётся автоматически в SQLite.
+## Возможности backend
+
+- IPC-команды для авторизации, выбора архива, сканирования, чтения данных и экспорта
+- парсер Excel на `calamine` с нормализацией названий и поддержкой дат в имени файла
+- локальная база `SQLite` с миграциями и кэшем
+- file watcher на `notify`
+- параллельная обработка архива через `rayon`
+
+## Возможности frontend
+
+- экран авторизации и локальные пользовательские сессии
+- dashboard с фильтрами и боковыми панелями
+- интерактивные графики с управлением диапазоном дат
+- статистические summary-блоки
+- экспорт данных и изображений графика
+
+## Быстрый старт
+
+### Требования
+
+- `Node.js 20+`
+- `npm 10+`
+- `Rust stable`
+
+### Локальная разработка
+
+```bash
+npm install
+npm run tauri:dev
+```
+
+### Production build фронтенда
+
+```bash
+npm run build
+```
+
+### Desktop build
+
+```bash
+npm run tauri:build
+```
 
 ## Проверки
 
-- `cargo check` (в `src-tauri`) — OK
-- `cargo test` (в `src-tauri`) — OK
+```bash
+npm run lint
+npm run build
+cd src-tauri && cargo test
+```
 
-Проверка `npm`/`next` в текущем окружении не выполнялась, так как отсутствует Node.js.
+## GitHub Actions
+
+В репозитории настроены workflow'ы:
+
+- `CI` для проверки frontend и Rust-части на push/pull request
+- `Release` для сборки Tauri-приложения под `macOS`, `Windows` и `Linux` по git-тегу формата `v*`
+
+Первый release можно выпустить так:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+## Авторизация по умолчанию
+
+- логин: `admin`
+- пароль: `admin`
+
+При первом запуске пользователь создаётся автоматически в локальной базе.

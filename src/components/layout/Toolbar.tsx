@@ -3,7 +3,7 @@
 import { ChartControls } from '@/components/charts/ChartControls';
 import { ObjectSelector } from '@/components/filters/ObjectSelector';
 import { TestTypeSelect } from '@/components/filters/TestTypeSelect';
-import type { TechnologicalObject, TestType } from '@/lib/types';
+import type { ChartGuideMode, TechnologicalObject, TestType } from '@/lib/types';
 
 interface ToolbarProps {
   testTypes: TestType[];
@@ -13,7 +13,9 @@ interface ToolbarProps {
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
   showAverage: boolean;
+  guideMode: ChartGuideMode;
   onToggleAverage: (show: boolean) => void;
+  onGuideModeChange: (mode: ChartGuideMode) => void;
 }
 
 export function Toolbar({
@@ -24,7 +26,9 @@ export function Toolbar({
   selectedObjectKeys,
   onChangeObjects,
   showAverage,
-  onToggleAverage
+  guideMode,
+  onToggleAverage,
+  onGuideModeChange
 }: ToolbarProps) {
   return (
     <div className="space-y-3 border border-ink/20 bg-white p-3">
@@ -32,7 +36,12 @@ export function Toolbar({
         <TestTypeSelect testTypes={testTypes} selectedTestIds={selectedTestIds} onChange={onSelectTests} />
         <ObjectSelector objects={availableObjects} selectedKeys={selectedObjectKeys} onChange={onChangeObjects} />
         <div className="flex items-end">
-          <ChartControls showAverage={showAverage} onToggleAverage={onToggleAverage} />
+          <ChartControls
+            showAverage={showAverage}
+            guideMode={guideMode}
+            onToggleAverage={onToggleAverage}
+            onGuideModeChange={onGuideModeChange}
+          />
         </div>
       </div>
     </div>
