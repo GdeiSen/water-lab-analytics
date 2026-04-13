@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "check": "npm run lint && npm run build",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:portable": "tauri build --bundles none"
