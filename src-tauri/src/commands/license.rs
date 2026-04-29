@@ -1,4 +1,10 @@
-use std::{fs, path::PathBuf, process::Command, time::Duration};
+use std::{fs, path::PathBuf, time::Duration};
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::process::Command;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
@@ -341,9 +347,16 @@ fn platform_machine_id() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn platform_machine_id() -> Option<String> {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     let output = Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
         .args([
+            "-NoLogo",
             "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
             "-Command",
             "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
         ])
