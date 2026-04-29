@@ -58,6 +58,7 @@ pub struct FileMeasurementRecord {
     pub object_key: String,
     pub object_label: String,
     pub object_order: u16,
+    pub object_active: bool,
     pub value: Option<f64>,
     pub raw_value: String,
 }

@@ -226,14 +226,16 @@ impl Database {
                             object_key,
                             object_label,
                             object_order,
+                            object_active,
                             value,
                             raw_value
                         )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                         ON CONFLICT(file_id, test_id, tank_number) DO UPDATE SET
                             object_key = excluded.object_key,
                             object_label = excluded.object_label,
                             object_order = excluded.object_order,
+                            object_active = excluded.object_active,
                             value = excluded.value,
                             raw_value = excluded.raw_value
                         "#,
@@ -244,6 +246,7 @@ impl Database {
                             value.object_key,
                             value.object_label,
                             value.object_order as i64,
+                            value.object_active,
                             value.value,
                             value.raw_value,
                         ],
@@ -316,9 +319,14 @@ impl Database {
 
         let mut objects_stmt = conn.prepare(
             r#"
-            SELECT DISTINCT m.object_key, m.object_label, m.object_order
+            SELECT
+                m.object_key,
+                m.object_label,
+                MIN(m.object_order) AS object_order,
+                MAX(m.object_active) AS object_active
             FROM measurements m
             WHERE m.file_id = ?1
+            GROUP BY m.object_key, m.object_label
             ORDER BY m.object_order ASC, m.object_label ASC
             "#,
         )?;
@@ -328,6 +336,7 @@ impl Database {
                 key: row.get(0)?,
                 label: row.get(1)?,
                 order: row.get::<_, i64>(2)? as u16,
+                active: row.get::<_, i64>(3)? != 0,
             })
         })?;
 
@@ -345,6 +354,7 @@ impl Database {
                 m.object_key,
                 m.object_label,
                 m.object_order,
+                m.object_active,
                 m.value,
                 m.raw_value
             FROM measurements m
@@ -361,8 +371,9 @@ impl Database {
                 object_key: row.get(2)?,
                 object_label: row.get(3)?,
                 object_order: row.get::<_, i64>(4)? as u16,
-                value: row.get(5)?,
-                raw_value: row.get(6)?,
+                object_active: row.get::<_, i64>(5)? != 0,
+                value: row.get(6)?,
+                raw_value: row.get(7)?,
             })
         })?;
 
@@ -470,6 +481,7 @@ impl Database {
                 m.object_key,
                 m.object_label,
                 m.object_order,
+                m.object_active,
                 m.value
             FROM measurements m
             JOIN files f ON f.id = m.file_id
@@ -491,19 +503,32 @@ impl Database {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)? as u16,
-                    row.get::<_, Option<f64>>(6)?,
+                    row.get::<_, i64>(6)? != 0,
+                    row.get::<_, Option<f64>>(7)?,
                 ))
             },
         )?;
 
         let mut by_date: BTreeMap<String, HashMap<i64, HashMap<String, Option<f64>>>> =
             BTreeMap::new();
-        let mut all_object_meta = HashMap::<String, (String, u16)>::new();
+        let mut all_object_meta = HashMap::<String, (String, u16, bool)>::new();
         let mut observed_test_ids = HashSet::<i64>::new();
         let mut stats_by_test = HashMap::<i64, Vec<f64>>::new();
 
         for row in rows {
-            let (date, test_id, test_name, object_key, object_label, object_order, value) = row?;
+            let (
+                date,
+                test_id,
+                test_name,
+                object_key,
+                object_label,
+                object_order,
+                object_active,
+                value,
+            ) = row?;
+            if object_filter.is_none() && !object_active {
+                continue;
+            }
             if let Some(filter) = &object_filter {
                 if !filter.contains(&object_key) {
                     continue;
@@ -514,10 +539,12 @@ impl Database {
                 .entry(object_key.clone())
                 .and_modify(|current| {
                     if object_order < current.1 {
-                        *current = (object_label.clone(), object_order);
+                        *current = (object_label.clone(), object_order, object_active);
+                    } else if object_active {
+                        current.2 = true;
                     }
                 })
-                .or_insert((object_label.clone(), object_order));
+                .or_insert((object_label.clone(), object_order, object_active));
 
             if let Some(filter) = &test_filter {
                 if !filter.contains(&test_id) {
@@ -572,10 +599,11 @@ impl Database {
         let objects = if requested_object_keys.is_empty() {
             let mut object_rows = all_object_meta
                 .iter()
-                .map(|(key, (label, order))| ChartObject {
+                .map(|(key, (label, order, active))| ChartObject {
                     object_key: key.clone(),
                     object_label: label.clone(),
                     object_order: *order,
+                    object_active: *active,
                 })
                 .collect::<Vec<_>>();
             object_rows.sort_by(|left, right| {
@@ -589,14 +617,15 @@ impl Database {
                 .iter()
                 .enumerate()
                 .map(|(index, key)| {
-                    let (label, order) = all_object_meta
+                    let (label, order, active) = all_object_meta
                         .get(key)
                         .cloned()
-                        .unwrap_or_else(|| (key.clone(), (index + 1) as u16));
+                        .unwrap_or_else(|| (key.clone(), (index + 1) as u16, true));
                     ChartObject {
                         object_key: key.clone(),
                         object_label: label,
                         object_order: order,
+                        object_active: active,
                     }
                 })
                 .collect::<Vec<_>>()

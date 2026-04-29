@@ -1,21 +1,33 @@
 "use client";
 
-import type { TestType } from "@/lib/types";
+import { Link2 } from "lucide-react";
+
+import type { ParameterLink, TestType } from "@/lib/types";
 
 interface TestTypeSelectProps {
   testTypes: TestType[];
   selectedTestIds: number[];
   onChange: (ids: number[]) => void;
+  parameterLinks?: ParameterLink[];
 }
 
 export function TestTypeSelect({
   testTypes,
   selectedTestIds,
   onChange,
+  parameterLinks = [],
 }: TestTypeSelectProps) {
   const sorted = [...testTypes].sort((left, right) =>
     left.displayName.localeCompare(right.displayName),
   );
+  const selected = new Set(selectedTestIds);
+  const activePairByTestId = new Map<number, ParameterLink>();
+  parameterLinks.forEach((link) => {
+    if (selected.has(link.inputTestId) && selected.has(link.outputTestId)) {
+      activePairByTestId.set(link.inputTestId, link);
+      activePairByTestId.set(link.outputTestId, link);
+    }
+  });
 
   function toggleTest(testId: number) {
     if (selectedTestIds.includes(testId)) {
@@ -52,20 +64,33 @@ export function TestTypeSelect({
         </button>
       </div>
       <div className="space-y-1">
-        {sorted.map((test) => (
-          <label
-            key={test.id}
-            className="flex cursor-pointer items-center gap-2 border border-transparent px-1.5 py-1 text-xs hover:border-ink/20"
-          >
-            <input
-              type="checkbox"
-              checked={selectedTestIds.includes(test.id)}
-              onChange={() => toggleTest(test.id)}
-              className="accent-ink"
-            />
-            <span className="min-w-0 truncate">{test.displayName}</span>
-          </label>
-        ))}
+        {sorted.map((test) => {
+          const activePair = activePairByTestId.get(test.id);
+          const isPairInput = activePair?.inputTestId === test.id;
+          return (
+            <label
+              key={test.id}
+              className="relative flex cursor-pointer items-center gap-2 border border-transparent px-1.5 py-1 text-xs hover:border-ink/20"
+            >
+              {activePair && isPairInput && (
+                <span className="absolute right-[13px] top-[22px] h-5 border-r border-dashed border-surge/80" />
+              )}
+              <input
+                type="checkbox"
+                checked={selectedTestIds.includes(test.id)}
+                onChange={() => toggleTest(test.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{test.displayName}</span>
+              {activePair && (
+                <Link2
+                  className="h-3.5 w-3.5 shrink-0 text-surge"
+                  aria-label="Активная связанная пара"
+                />
+              )}
+            </label>
+          );
+        })}
       </div>
     </div>
   );

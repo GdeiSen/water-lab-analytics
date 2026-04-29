@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS measurements (
     object_key  TEXT NOT NULL,
     object_label TEXT NOT NULL,
     object_order INTEGER NOT NULL,
+    object_active INTEGER NOT NULL DEFAULT 1,
     value       REAL,
     raw_value   TEXT NOT NULL,
     UNIQUE(file_id, test_id, tank_number),
@@ -87,6 +88,12 @@ pub fn run_migrations(connection: &Connection) -> Result<(), AppError> {
         "measurements",
         "object_order",
         "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        connection,
+        "measurements",
+        "object_active",
+        "INTEGER NOT NULL DEFAULT 1",
     )?;
 
     connection.execute_batch(

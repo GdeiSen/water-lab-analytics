@@ -40,6 +40,7 @@ pub struct ChartObject {
     pub object_key: String,
     pub object_label: String,
     pub object_order: u16,
+    pub object_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

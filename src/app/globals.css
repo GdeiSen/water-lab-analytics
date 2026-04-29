@@ -8,6 +8,7 @@
 :root {
   --background: #f1f3f5;
   --foreground: #111827;
+  --ui-scale: 1;
 }
 
 * {
@@ -28,6 +29,17 @@ body {
   background: var(--background);
   font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
 }
+
+html.ui-bold-font body,
+html.ui-bold-font body * {
+  font-weight: 700 !important;
+}
+
+html.ui-theme-white body {
+  --background: #f8fafc;
+  --foreground: #111827;
+}
+
 
 input,
 textarea,

@@ -39,6 +39,7 @@ export interface TechnologicalObject {
   key: string;
   label: string;
   order: number;
+  active: boolean;
 }
 
 export interface FileMeasurementRecord {
@@ -47,6 +48,7 @@ export interface FileMeasurementRecord {
   objectKey: string;
   objectLabel: string;
   objectOrder: number;
+  objectActive: boolean;
   value: number | null;
   rawValue: string;
 }
@@ -70,6 +72,15 @@ export interface TestType {
   aliases: string[];
 }
 
+export interface ParameterLink {
+  id: string;
+  label: string;
+  inputTestId: number;
+  inputTestName: string;
+  outputTestId: number;
+  outputTestName: string;
+}
+
 export interface ChartTest {
   testId: number;
   testName: string;
@@ -79,6 +90,7 @@ export interface ChartObject {
   objectKey: string;
   objectLabel: string;
   objectOrder: number;
+  objectActive: boolean;
 }
 
 export interface ChartValuePoint {

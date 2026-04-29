@@ -7,6 +7,7 @@ import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
 import type {
   ChartGuideMode,
   ChartOptimizationSettings,
+  ParameterLink,
   TechnologicalObject,
   TestType,
 } from "@/lib/types";
@@ -18,6 +19,7 @@ interface RightSidebarProps {
   testTypes: TestType[];
   selectedTestIds: number[];
   onSelectTests: (ids: number[]) => void;
+  parameterLinks: ParameterLink[];
   availableObjects: TechnologicalObject[];
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
@@ -34,6 +36,7 @@ export function RightSidebar({
   testTypes,
   selectedTestIds,
   onSelectTests,
+  parameterLinks,
   availableObjects,
   selectedObjectKeys,
   onChangeObjects,
@@ -123,6 +126,7 @@ export function RightSidebar({
                   testTypes={testTypes}
                   selectedTestIds={selectedTestIds}
                   onChange={onSelectTests}
+                  parameterLinks={parameterLinks}
                 />
               </div>
             </>

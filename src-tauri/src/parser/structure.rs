@@ -157,6 +157,14 @@ fn parse_object_header_cell(raw: &str) -> HeaderCellParse {
         return HeaderCellParse::Stop;
     }
 
+    if is_aggregate_object_label(&lower) {
+        return HeaderCellParse::Object {
+            key: "total_average".to_string(),
+            label,
+            numeric: false,
+        };
+    }
+
     if lower.contains('/') || lower.contains("Ð¼Ð³/Ð»") || lower.contains("Ð³Ñ€/Ð»") {
         return HeaderCellParse::Skip;
     }
@@ -253,18 +261,22 @@ fn looks_like_decimal_number(value: &str) -> bool {
 }
 
 fn is_service_header_marker(value: &str) -> bool {
-    value.contains("Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ñ‹Ðµ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚")
-        || value.contains("ÑÐ»ÑƒÐ¶ÐµÐ±Ð½Ð°Ñ Ð¸Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†")
-        || value.contains("Ð³Ð°Ð±Ð°Ñ€Ð¸Ñ‚")
+    value.contains("проектные парамет")
+        || value.contains("служебная информац")
+        || value.contains("габарит")
 }
 
 fn is_header_row_hint(value: &str) -> bool {
     let normalized = value.to_lowercase();
-    normalized.contains("Ð½Ð¾Ð¼ÐµÑ€")
-        || normalized.contains("Ð¾Ð±ÑŠÐµÐºÑ‚")
-        || normalized.contains("Ð°ÑÑ€Ð¾Ñ‚ÐµÐ½Ðº")
-        || normalized.contains("Ñ‚Ð°Ð½Ðº")
+    normalized.contains("номер")
+        || normalized.contains("объект")
+        || normalized.contains("аэротенк")
+        || normalized.contains("танк")
         || normalized.contains("lab")
+}
+
+fn is_aggregate_object_label(value: &str) -> bool {
+    value.contains("усред") || value.contains("общее") || value.contains("суммар")
 }
 
 fn continuity_score(columns: &[HeaderObjectColumn]) -> usize {
@@ -310,5 +322,14 @@ mod tests {
     fn treats_average_header_as_regular_object_column() {
         let parsed = parse_object_header_cell("Average");
         assert!(matches!(parsed, HeaderCellParse::Object { .. }));
+    }
+
+    #[test]
+    fn treats_total_average_header_as_regular_object_column() {
+        let parsed = parse_object_header_cell("Общее / Усредненное");
+        assert!(matches!(
+            parsed,
+            HeaderCellParse::Object { key, .. } if key == "total_average"
+        ));
     }
 }

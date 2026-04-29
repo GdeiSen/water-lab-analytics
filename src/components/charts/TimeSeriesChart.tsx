@@ -42,6 +42,7 @@ interface TimeSeriesChartProps {
   guideMode: ChartGuideMode;
   optimization: ChartOptimizationSettings;
   height: number;
+  uiScale: number;
   onHoverChange?: (snapshot: ChartHoverSnapshot | null) => void;
   onExportPng?: () => void;
   onPrintChart?: () => void;
@@ -133,6 +134,7 @@ export function TimeSeriesChart({
   guideMode,
   optimization,
   height,
+  uiScale,
   onHoverChange,
   onExportPng,
   onPrintChart,
@@ -510,14 +512,23 @@ export function TimeSeriesChart({
       })
     : [];
   const isExpanded = isFullscreen || isPseudoFullscreen;
+  const scale = Number.isFinite(uiScale) && uiScale > 0 ? uiScale : 1;
+  const axisWidth = Math.round(AXIS_WIDTH * scale);
+  const axisControlZoneWidth = Math.round(AXIS_CONTROL_ZONE_WIDTH * scale);
+  const axisControlButtonSize = Math.round(AXIS_CONTROL_BUTTON_SIZE * scale);
+  const axisControlInset = Math.round(AXIS_CONTROL_VERTICAL_INSET * scale);
+  const tickFontSize = Math.round(11 * scale);
+  const guideFontSize = Math.round(10 * scale);
+  const guideLabelHeight = Math.round(12 * scale);
+  const xAxisHeight = Math.round(24 * scale);
   const axisViewportHeight = chartViewportRef.current?.clientHeight ?? height;
-  const axisPlotTop = 8;
-  const axisPlotBottom = 36;
+  const axisPlotTop = Math.round(8 * scale);
+  const axisPlotBottom = Math.round(36 * scale);
   const axisPlotHeight = Math.max(
-    36,
+    Math.round(36 * scale),
     axisViewportHeight - axisPlotTop - axisPlotBottom,
   );
-  const axisPlotLeft = leftMargin + axisLayout.leftCount * AXIS_WIDTH;
+  const axisPlotLeft = leftMargin + axisLayout.leftCount * axisWidth;
 
   const adjustAxisTickDensity = (axisId: string, delta: number) => {
     setAxisTickCounts((previous) => {
@@ -579,9 +590,9 @@ export function TimeSeriesChart({
       return null;
     }
 
-    const derivedPlotTop = 8;
-    const derivedPlotBottom = 8;
-    const derivedPlotLeft = leftMargin + axisLayout.leftCount * AXIS_WIDTH;
+    const derivedPlotTop = 8 * scale;
+    const derivedPlotBottom = 8 * scale;
+    const derivedPlotLeft = leftMargin + axisLayout.leftCount * axisWidth;
     const derivedPlotWidth = Math.max(
       1,
       viewport.clientWidth - derivedPlotLeft - rightMargin,
@@ -685,7 +696,12 @@ export function TimeSeriesChart({
       <div className="flex h-full min-h-0 flex-col">
         <div
           ref={chartViewportRef}
-          className="relative min-h-0 flex-1 pb-1 pr-3 pt-3"
+          className="relative min-h-0 flex-1"
+          style={{
+            paddingTop: 12 * scale,
+            paddingRight: 12 * scale,
+            paddingBottom: 4 * scale,
+          }}
         >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
@@ -759,13 +775,13 @@ export function TimeSeriesChart({
               <XAxis
                 dataKey="date"
                 interval="preserveStartEnd"
-                minTickGap={28}
+                minTickGap={28 * scale}
                 tickFormatter={(value) => formatXAxisDate(String(value))}
-                tick={{ fontSize: 11, fill: AXIS_STROKE }}
+                tick={{ fontSize: tickFontSize, fill: AXIS_STROKE }}
                 tickLine={{ stroke: AXIS_STROKE }}
                 axisLine={{ stroke: AXIS_STROKE }}
-                tickMargin={12}
-                height={24}
+                tickMargin={12 * scale}
+                height={xAxisHeight}
               />
 
               {axisLayout.groups.map((group) => (
@@ -773,9 +789,9 @@ export function TimeSeriesChart({
                   key={group.axisId}
                   yAxisId={group.axisId}
                   orientation={group.orientation}
-                  width={AXIS_WIDTH}
+                  width={axisWidth}
                   stroke={AXIS_STROKE}
-                  tick={{ fontSize: 11, fill: AXIS_STROKE }}
+                  tick={{ fontSize: tickFontSize, fill: AXIS_STROKE }}
                   tickLine={{ stroke: AXIS_STROKE }}
                   axisLine={{ stroke: AXIS_STROKE }}
                   domain={[group.domain[0], group.domain[1]]}
@@ -784,7 +800,7 @@ export function TimeSeriesChart({
                   }
                   allowDataOverflow
                   label={(props: AxisLabelProps) =>
-                    renderAxisColorStrips(props, group.tests, testColorById)
+                    renderAxisColorStrips(props, group.tests, testColorById, scale)
                   }
                 />
               ))}
@@ -801,7 +817,7 @@ export function TimeSeriesChart({
                   stroke={series.color}
                   dot={false}
                   isAnimationActive
-                  strokeWidth={1.8}
+                  strokeWidth={1.8 * scale}
                   connectNulls
                 />
               ))}
@@ -824,7 +840,7 @@ export function TimeSeriesChart({
                       strokeDasharray="6 4"
                       dot={false}
                       isAnimationActive
-                      strokeWidth={2.2}
+                      strokeWidth={2.2 * scale}
                       connectNulls
                     />
                   ) : null
@@ -854,10 +870,10 @@ export function TimeSeriesChart({
                     yAxisId={guide.axisId}
                     x={lockedGuide.date}
                     y={guide.value}
-                    r={3.5}
+                    r={3.5 * scale}
                     fill={guide.color}
                     stroke="#ffffff"
-                    strokeWidth={1}
+                    strokeWidth={1 * scale}
                     ifOverflow="extendDomain"
                     isFront
                   />
@@ -889,7 +905,7 @@ export function TimeSeriesChart({
                       : activeFrame.plotHeight;
                   const leftMostAxisX =
                     activeFrame.plotLeft -
-                    (axisLayout.leftCount - 1) * AXIS_WIDTH;
+                    (axisLayout.leftCount - 1) * axisWidth;
 
                   return (
                     <g>
@@ -917,20 +933,20 @@ export function TimeSeriesChart({
 
                         const axisLineX =
                           activeFrame.plotLeft -
-                          axisGroup.sideIndex * AXIS_WIDTH;
+                          axisGroup.sideIndex * axisWidth;
                         const textLabel = formatGuideValue(guide.value);
-                        const textX = axisLineX - 1;
+                        const textX = axisLineX - 1 * scale;
                         const textY = clamp(
                           y,
-                          plotTop + 8,
-                          plotTop + plotHeight - 6,
+                          plotTop + 8 * scale,
+                          plotTop + plotHeight - 6 * scale,
                         );
                         const labelWidth = Math.max(
-                          18,
-                          textLabel.length * 6.2 + 6,
+                          18 * scale,
+                          textLabel.length * 6.2 * scale + 6 * scale,
                         );
-                        const labelHeight = 12;
-                        const labelRight = textX + 1;
+                        const labelHeight = guideLabelHeight;
+                        const labelRight = textX + 1 * scale;
                         const labelX = labelRight - labelWidth;
                         const labelY = textY - labelHeight / 2;
 
@@ -944,7 +960,7 @@ export function TimeSeriesChart({
                               stroke={guide.color}
                               strokeDasharray={guide.dashArray}
                               strokeOpacity={0.65}
-                              strokeWidth={1}
+                              strokeWidth={1 * scale}
                             />
                             <rect
                               x={labelX}
@@ -960,7 +976,7 @@ export function TimeSeriesChart({
                               y={textY}
                               textAnchor="end"
                               dominantBaseline="middle"
-                              fontSize={10}
+                              fontSize={guideFontSize}
                               fontWeight={600}
                               fontFamily="'IBM Plex Mono', monospace"
                               fill={guide.color}
@@ -978,7 +994,7 @@ export function TimeSeriesChart({
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 z-20">
             {axisLayout.groups.map((group) => {
-              const axisLineX = axisPlotLeft - group.sideIndex * AXIS_WIDTH;
+              const axisLineX = axisPlotLeft - group.sideIndex * axisWidth;
               const isVisible = hoveredAxisId === group.axisId;
               const canIncrease =
                 (axisTickCounts[group.axisId] ?? DEFAULT_AXIS_TICK_COUNT) <
@@ -992,9 +1008,9 @@ export function TimeSeriesChart({
                   key={`axis-controls-${group.axisId}`}
                   className="pointer-events-auto absolute"
                   style={{
-                    left: axisLineX - AXIS_CONTROL_ZONE_WIDTH / 2,
+                    left: axisLineX - axisControlZoneWidth / 2,
                     top: axisPlotTop,
-                    width: AXIS_CONTROL_ZONE_WIDTH,
+                    width: axisControlZoneWidth,
                     height: axisPlotHeight,
                   }}
                   onMouseEnter={() => setHoveredAxisId(group.axisId)}
@@ -1010,9 +1026,9 @@ export function TimeSeriesChart({
                       isVisible ? "opacity-100" : "pointer-events-none opacity-0"
                     } ${canIncrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
                     style={{
-                      top: AXIS_CONTROL_VERTICAL_INSET,
-                      width: AXIS_CONTROL_BUTTON_SIZE,
-                      height: AXIS_CONTROL_BUTTON_SIZE,
+                      top: axisControlInset,
+                      width: axisControlButtonSize,
+                      height: axisControlButtonSize,
                     }}
                     title="Increase scale granularity"
                     disabled={!canIncrease}
@@ -1022,7 +1038,7 @@ export function TimeSeriesChart({
                       adjustAxisTickDensity(group.axisId, 1);
                     }}
                   >
-                    <ChevronUp className="h-3 w-3" />
+                    <ChevronUp style={{ width: 12 * scale, height: 12 * scale }} />
                   </button>
                   <button
                     type="button"
@@ -1030,9 +1046,9 @@ export function TimeSeriesChart({
                       isVisible ? "opacity-100" : "pointer-events-none opacity-0"
                     } ${canDecrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
                     style={{
-                      bottom: AXIS_CONTROL_VERTICAL_INSET,
-                      width: AXIS_CONTROL_BUTTON_SIZE,
-                      height: AXIS_CONTROL_BUTTON_SIZE,
+                      bottom: axisControlInset,
+                      width: axisControlButtonSize,
+                      height: axisControlButtonSize,
                     }}
                     title="Decrease scale granularity"
                     disabled={!canDecrease}
@@ -1042,7 +1058,7 @@ export function TimeSeriesChart({
                       adjustAxisTickDensity(group.axisId, -1);
                     }}
                   >
-                    <ChevronDown className="h-3 w-3" />
+                    <ChevronDown style={{ width: 12 * scale, height: 12 * scale }} />
                   </button>
                 </div>
               );
@@ -1050,58 +1066,74 @@ export function TimeSeriesChart({
           </div>
         </div>
         {prepared.tests.length > 0 && (
-          <div className="border-t border-ink/15 px-3 py-2">
+          <div
+            className="border-t border-ink/15"
+            style={{ padding: `${8 * scale}px ${12 * scale}px` }}
+          >
             <div className="flex items-start justify-between gap-2">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink/75">
+              <div
+                className="flex flex-wrap text-ink/75"
+                style={{
+                  columnGap: 16 * scale,
+                  rowGap: 4 * scale,
+                  fontSize: 11 * scale,
+                }}
+              >
                 {prepared.tests.map((test) => (
                   <div
                     key={`legend-${test.testId}`}
-                    className="flex items-center gap-1.5"
+                    className="flex items-center"
+                    style={{ gap: 6 * scale }}
                   >
                     <span
-                      className="inline-block h-[3px] w-5 rounded-sm"
+                      className="inline-block rounded-sm"
                       style={{
+                        width: 20 * scale,
+                        height: 3 * scale,
                         backgroundColor:
                           testColorById.get(test.testId) ?? "#0f766e",
                       }}
                     />
-                    <span className="max-w-[280px] truncate">
+                    <span className="truncate" style={{ maxWidth: 280 * scale }}>
                       {test.testName}
                     </span>
                   </div>
                 ))}
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div className="flex shrink-0 items-center" style={{ gap: 6 * scale }}>
                 <button
                   type="button"
                   onClick={() => onExportPng?.()}
-                  className="flex h-8 w-8 items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                  style={{ width: 32 * scale, height: 32 * scale }}
                   title="Экспортировать график в PNG"
                   disabled={!onExportPng}
                 >
-                  <ImageDown className="h-4 w-4" />
+                  <ImageDown style={{ width: 16 * scale, height: 16 * scale }} />
                 </button>
                 <button
                   type="button"
                   onClick={() => onPrintChart?.()}
-                  className="flex h-8 w-8 items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                  style={{ width: 32 * scale, height: 32 * scale }}
                   title="Печать графика"
                   disabled={!onPrintChart}
                 >
-                  <Printer className="h-4 w-4" />
+                  <Printer style={{ width: 16 * scale, height: 16 * scale }} />
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     void toggleFullscreen();
                   }}
-                  className="flex h-8 w-8 items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink"
+                  className="flex items-center justify-center rounded border border-ink/25 text-ink/70 transition hover:bg-ink/5 hover:text-ink"
+                  style={{ width: 32 * scale, height: 32 * scale }}
                   title={isExpanded ? "Свернуть график" : "Развернуть график"}
                 >
                   {isExpanded ? (
-                    <Minimize2 className="h-4 w-4" />
+                    <Minimize2 style={{ width: 16 * scale, height: 16 * scale }} />
                   ) : (
-                    <Maximize2 className="h-4 w-4" />
+                    <Maximize2 style={{ width: 16 * scale, height: 16 * scale }} />
                   )}
                 </button>
               </div>
@@ -1331,6 +1363,7 @@ function renderAxisColorStrips(
   props: AxisLabelProps,
   tests: ChartTest[],
   testColorById: Map<number, string>,
+  scale = 1,
 ) {
   if (tests.length === 0) {
     return null;
@@ -1342,11 +1375,11 @@ function renderAxisColorStrips(
   const width = typeof viewBox.width === "number" ? viewBox.width : 0;
   const height = typeof viewBox.height === "number" ? viewBox.height : 0;
 
-  const stripWidth = 26;
-  const stripHeight = 3;
-  const gap = 2.5;
+  const stripWidth = 26 * scale;
+  const stripHeight = 3 * scale;
+  const gap = 2.5 * scale;
   const stripX = x + width - stripWidth;
-  const startY = y + height + 6;
+  const startY = y + height + 6 * scale;
 
   return (
     <g>

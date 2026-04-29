@@ -12,12 +12,14 @@ import type {
   ChartHoverSnapshot,
   ChartOptimizationSettings,
   DateRange,
+  ParameterLink,
   ParseProgress
 } from '@/lib/types';
 
 interface MainAreaProps {
   selectedTestIds: number[];
   selectedObjectKeys: string[];
+  parameterLinks: ParameterLink[];
   availableDates: string[];
   dateRange: DateRange;
   onDateRangeChange: (range: DateRange) => void;
@@ -35,6 +37,7 @@ interface MainAreaProps {
 export function MainArea({
   selectedTestIds,
   selectedObjectKeys,
+  parameterLinks,
   availableDates,
   dateRange,
   onDateRangeChange,
@@ -52,6 +55,7 @@ export function MainArea({
   const previewLineRef = useRef<HTMLDivElement | null>(null);
   const pendingHeightRef = useRef<number | null>(null);
   const [chartHeight, setChartHeight] = useState(360);
+  const [uiScale, setUiScale] = useState(1);
   const [hoverSnapshot, setHoverSnapshot] = useState<ChartHoverSnapshot | null>(null);
   const [resizeStart, setResizeStart] = useState<{ y: number; height: number; min: number; max: number } | null>(
     null
@@ -67,7 +71,10 @@ export function MainArea({
 
   function getHeightLimits() {
     const rootHeight = rootRef.current?.clientHeight ?? 900;
-    return { min: 220, max: Math.max(300, rootHeight - 260) };
+    return {
+      min: Math.round(220 * uiScale),
+      max: Math.max(Math.round(300 * uiScale), rootHeight - Math.round(260 * uiScale))
+    };
   }
 
   useEffect(() => {
@@ -75,6 +82,19 @@ export function MainArea({
       setHoverSnapshot(null);
     }
   }, [chartData]);
+
+  useEffect(() => {
+    const readScale = () => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue('--ui-scale');
+      const next = Number.parseFloat(raw);
+      setUiScale(Number.isFinite(next) && next > 0 ? next : 1);
+    };
+
+    readScale();
+    const observer = new MutationObserver(readScale);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!resizeStart) {
@@ -132,7 +152,8 @@ export function MainArea({
             showAverage={showAverage}
             guideMode={guideMode}
             optimization={chartOptimization}
-            height={chartHeight}
+            height={Math.round(chartHeight * uiScale)}
+            uiScale={uiScale}
             onHoverChange={setHoverSnapshot}
             onExportPng={onExportPng}
             onPrintChart={onPrintChart}
@@ -155,6 +176,7 @@ export function MainArea({
           hoverSnapshot={hoverSnapshot}
           selectedTestIds={selectedTestIds}
           selectedObjectKeys={selectedObjectKeys}
+          parameterLinks={parameterLinks}
           onExportExcel={onExportExcel}
         />
       </div>

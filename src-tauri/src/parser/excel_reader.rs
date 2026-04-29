@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use calamine::{open_workbook_auto, Data, Range, Reader};
 use chrono::NaiveDate;
@@ -18,6 +18,8 @@ use crate::{
 static FILENAME_DATE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?P<day>\d{2})[._](?P<month>\d{2})[._](?P<year>\d{4})").expect("valid regex")
 });
+static ACTIVITY_ROW_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?iu)индикатор.*работ").expect("valid regex"));
 
 pub fn parse_file(path: &Path, normalizer: &NameNormalizer) -> Result<ParsedFile, ParseError> {
     let date = parse_date_from_filename(path)?;
@@ -45,6 +47,7 @@ fn parse_sheet(
     }
 
     let (header_row, object_columns) = detect_header(&sheet)?;
+    let activity_states = detect_object_activity(sheet, &object_columns);
     let object_count = object_columns.len() as u16;
 
     let mut warnings = Vec::new();
@@ -54,6 +57,7 @@ fn parse_sheet(
             key: column.key.clone(),
             label: column.label.clone(),
             order: column.order,
+            active: object_active(&activity_states, column.col_idx),
         })
         .collect::<Vec<_>>();
 
@@ -94,6 +98,7 @@ fn parse_sheet(
                 object_key: column.key.clone(),
                 object_label: column.label.clone(),
                 object_order: column.order,
+                object_active: object_active(&activity_states, column.col_idx),
                 value,
                 raw_value: raw,
             });
@@ -137,6 +142,38 @@ fn row_has_measurement_payload(sheet: &Range<Data>, row_idx: usize) -> bool {
         let raw = cell_to_string(sheet.get_value((row_idx as u32, col_idx as u32)));
         !raw.trim().is_empty()
     })
+}
+
+fn detect_object_activity(
+    sheet: &Range<Data>,
+    object_columns: &[crate::parser::structure::HeaderObjectColumn],
+) -> HashMap<usize, bool> {
+    let activity_row = (0..sheet.height()).find(|row_idx| {
+        let label = cell_to_string(sheet.get_value((*row_idx as u32, 0)));
+        ACTIVITY_ROW_RE.is_match(&label)
+    });
+
+    let Some(row_idx) = activity_row else {
+        return HashMap::new();
+    };
+
+    object_columns
+        .iter()
+        .map(|column| {
+            let (value, raw) =
+                parse_numeric_cell(sheet.get_value((row_idx as u32, column.col_idx as u32)));
+            let active = match value {
+                Some(value) => value.round() != 0.0,
+                None => raw.trim() != "0",
+            };
+
+            (column.col_idx, active)
+        })
+        .collect()
+}
+
+fn object_active(activity_states: &HashMap<usize, bool>, col_idx: usize) -> bool {
+    activity_states.get(&col_idx).copied().unwrap_or(true)
 }
 
 pub fn parse_date_from_filename(path: &Path) -> Result<NaiveDate, ParseError> {
@@ -219,5 +256,57 @@ mod tests {
         assert!(parsed.warnings[0].contains("строка 3"));
         assert!(parsed.warnings[0].contains("без названия испытания"));
         assert!(matches!(parsed.status, FileStatus::Warning(_)));
+    }
+
+    #[test]
+    fn includes_total_column_and_filters_inactive_objects() {
+        let sheet = Range::from_sparse(vec![
+            Cell::new((0, 0), Data::String("Номер Секции".to_string())),
+            Cell::new((0, 1), Data::String("1".to_string())),
+            Cell::new((0, 2), Data::String("2".to_string())),
+            Cell::new((0, 3), Data::String("3".to_string())),
+            Cell::new((0, 4), Data::String("Общее / Усредненное".to_string())),
+            Cell::new((1, 0), Data::String("Азот аммонийный".to_string())),
+            Cell::new((1, 1), Data::Float(10.0)),
+            Cell::new((1, 2), Data::Float(20.0)),
+            Cell::new((1, 3), Data::Float(30.0)),
+            Cell::new((1, 4), Data::Float(60.0)),
+            Cell::new((2, 0), Data::String("Проектные параметры".to_string())),
+            Cell::new(
+                (3, 0),
+                Data::String(
+                    "Индикаторы работы Секции (1- Работа/0 - Выведен из эксплуатации)".to_string(),
+                ),
+            ),
+            Cell::new((3, 1), Data::Float(0.0)),
+            Cell::new((3, 2), Data::Float(1.0)),
+            Cell::new((3, 3), Data::Float(0.0)),
+            Cell::new((3, 4), Data::Float(1.0)),
+        ]);
+
+        let parsed = parse_sheet(
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 1).expect("valid date"),
+            "01.04.2026.xlsx".to_string(),
+            &sheet,
+            &NameNormalizer::default(),
+        )
+        .expect("parsed file");
+
+        assert_eq!(parsed.object_count, 4);
+        assert_eq!(
+            parsed
+                .objects
+                .iter()
+                .filter(|object| object.active)
+                .map(|object| object.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["2", "Общее / Усредненное"]
+        );
+        assert_eq!(parsed.measurements.len(), 1);
+        assert_eq!(parsed.measurements[0].values.len(), 4);
+        assert_eq!(parsed.measurements[0].values[0].object_active, false);
+        assert_eq!(parsed.measurements[0].values[1].object_active, true);
+        assert_eq!(parsed.measurements[0].values[2].object_active, false);
+        assert_eq!(parsed.measurements[0].values[3].object_active, true);
     }
 }

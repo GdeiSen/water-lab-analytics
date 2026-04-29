@@ -50,7 +50,7 @@ export function useArchive() {
         if (files[0]) {
           const details = await api.getFileDetails(session.token, files[0].id);
           setFileDetails(details);
-          setSelectedObjectKeys(details.objects.map((item) => item.key));
+          setSelectedObjectKeys(details.objects.filter((item) => item.active).map((item) => item.key));
         } else {
           setFileDetails(null);
           setSelectedObjectKeys([]);
@@ -141,7 +141,7 @@ export function useArchive() {
       if (files[0]) {
         const details = await api.getFileDetails(session.token, files[0].id);
         setFileDetails(details);
-        setSelectedObjectKeys(details.objects.map((item) => item.key));
+        setSelectedObjectKeys(details.objects.filter((item) => item.active).map((item) => item.key));
       } else {
         setFileDetails(null);
         setSelectedObjectKeys([]);

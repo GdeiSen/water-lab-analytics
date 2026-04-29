@@ -3,12 +3,13 @@
 import { ChartControls } from '@/components/charts/ChartControls';
 import { ObjectSelector } from '@/components/filters/ObjectSelector';
 import { TestTypeSelect } from '@/components/filters/TestTypeSelect';
-import type { ChartGuideMode, TechnologicalObject, TestType } from '@/lib/types';
+import type { ChartGuideMode, ParameterLink, TechnologicalObject, TestType } from '@/lib/types';
 
 interface ToolbarProps {
   testTypes: TestType[];
   selectedTestIds: number[];
   onSelectTests: (ids: number[]) => void;
+  parameterLinks?: ParameterLink[];
   availableObjects: TechnologicalObject[];
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
@@ -22,6 +23,7 @@ export function Toolbar({
   testTypes,
   selectedTestIds,
   onSelectTests,
+  parameterLinks = [],
   availableObjects,
   selectedObjectKeys,
   onChangeObjects,
@@ -33,7 +35,12 @@ export function Toolbar({
   return (
     <div className="space-y-3 border border-ink/20 bg-white p-3">
       <div className="grid gap-3 lg:grid-cols-[minmax(280px,1.2fr)_minmax(280px,1fr)_auto]">
-        <TestTypeSelect testTypes={testTypes} selectedTestIds={selectedTestIds} onChange={onSelectTests} />
+        <TestTypeSelect
+          testTypes={testTypes}
+          selectedTestIds={selectedTestIds}
+          onChange={onSelectTests}
+          parameterLinks={parameterLinks}
+        />
         <ObjectSelector objects={availableObjects} selectedKeys={selectedObjectKeys} onChange={onChangeObjects} />
         <div className="flex items-end">
           <ChartControls

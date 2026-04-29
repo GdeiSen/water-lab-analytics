@@ -35,6 +35,7 @@ pub struct TechnologicalObject {
     pub key: String,
     pub label: String,
     pub order: u16,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,7 @@ pub struct ObjectValue {
     pub object_key: String,
     pub object_label: String,
     pub object_order: u16,
+    pub object_active: bool,
     pub value: Option<f64>,
     pub raw_value: String,
 }

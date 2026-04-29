@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileDown, Maximize2, Minimize2, Search } from 'lucide-react';
 
-import type { ChartDataset, ChartHoverSnapshot } from '@/lib/types';
+import type {
+  ChartDataset,
+  ChartHoverSnapshot,
+  ChartTestStats,
+  ParameterLink
+} from '@/lib/types';
 import { formatDate, formatNumber } from '@/lib/utils';
 import { TANK_COLORS } from '@/lib/utils';
 
@@ -12,6 +17,7 @@ interface StatsSummaryProps {
   hoverSnapshot: ChartHoverSnapshot | null;
   selectedTestIds: number[];
   selectedObjectKeys: string[];
+  parameterLinks: ParameterLink[];
   onExportExcel: () => void;
 }
 
@@ -38,6 +44,7 @@ export function StatsSummary({
   hoverSnapshot,
   selectedTestIds,
   selectedObjectKeys,
+  parameterLinks,
   onExportExcel
 }: StatsSummaryProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -192,6 +199,18 @@ export function StatsSummary({
 
   const activeDate = hoverSnapshot?.date ?? null;
   const isExpanded = isFullscreen || isPseudoFullscreen;
+  const statGroups = useMemo(
+    () =>
+      buildStatGroups(
+        statsEntries,
+        parameterLinks,
+        selectedTestIds,
+        selectedObjectKeys,
+        data,
+        hoverSnapshot
+      ),
+    [data, hoverSnapshot, parameterLinks, selectedObjectKeys, selectedTestIds, statsEntries]
+  );
 
   const toggleSort = (key: 'date' | string) => {
     setSortState((current) => {
@@ -245,31 +264,48 @@ export function StatsSummary({
   return (
     <div className="space-y-3 border border-ink/20 bg-white p-3">
       <div className="grid gap-2 md:grid-cols-2">
-        {statsEntries.map((entry, index) => {
-          const color = TANK_COLORS[index % TANK_COLORS.length];
-          return (
-            <div key={entry.testId} className="border border-ink/15 bg-[#f7f8fa] p-2">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-ink/70">
-                  {entry.testName}
-                </p>
-                <div
-                  className="shrink-0 border bg-white px-2 py-0.5 text-xs font-semibold"
-                  style={{
-                    borderColor: color,
-                    color
-                  }}
-                >
-                  {formatNumber(getHoverCursorValue(hoverSnapshot, entry.testId))}
+        {statGroups.map((group) => {
+          if (group.kind === 'linked') {
+            return (
+              <div key={`linked-${group.link.id}`} className="md:col-span-2">
+                <div className="border border-ink/15 bg-[#f7f8fa] px-3 py-2 text-ink">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide">
+                      Эффективность: {group.link.label}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="border border-ink/15 bg-white px-2 py-0.5">
+                        Средняя: {formatPercent(group.averageEfficiency)}
+                      </span>
+                      <span className="border border-ink/15 bg-white px-2 py-0.5">
+                        {formatPercent(group.cursorEfficiency)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-2 border-x border-b border-ink/20 bg-white p-2 md:grid-cols-2">
+                  {group.entries.map((entry) => (
+                    <StatsCard
+                      key={entry.testId}
+                      entry={entry}
+                      color={testColorById.get(entry.testId) ?? TANK_COLORS[0]}
+                      hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId)}
+                    />
+                  ))}
                 </div>
               </div>
-              <div className="grid grid-cols-4 gap-1">
-                <Stat title="Min" value={formatNumber(entry.stats.min)} />
-                <Stat title="Max" value={formatNumber(entry.stats.max)} />
-                <Stat title={'\u0421\u0440\u0435\u0434\u043d\u0435\u0435'} value={formatNumber(entry.stats.average)} />
-                <Stat title={'\u041c\u0435\u0434\u0438\u0430\u043d\u0430'} value={formatNumber(entry.stats.median)} />
-              </div>
-            </div>
+            );
+          }
+
+          const entry = group.entry;
+          const color = testColorById.get(entry.testId) ?? TANK_COLORS[0];
+          return (
+            <StatsCard
+              key={entry.testId}
+              entry={entry}
+              color={color}
+              hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId)}
+            />
           );
         })}
       </div>
@@ -407,6 +443,41 @@ export function StatsSummary({
   );
 }
 
+function StatsCard({
+  entry,
+  color,
+  hoverValue
+}: {
+  entry: ChartTestStats;
+  color: string;
+  hoverValue: number | null;
+}) {
+  return (
+    <div className="border border-ink/15 bg-[#f7f8fa] p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-ink/70">
+          {entry.testName}
+        </p>
+        <div
+          className="shrink-0 border bg-white px-2 py-0.5 text-xs font-semibold"
+          style={{
+            borderColor: color,
+            color
+          }}
+        >
+          {formatNumber(hoverValue)}
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        <Stat title="Min" value={formatNumber(entry.stats.min)} />
+        <Stat title="Max" value={formatNumber(entry.stats.max)} />
+        <Stat title={'\u0421\u0440\u0435\u0434\u043d\u0435\u0435'} value={formatNumber(entry.stats.average)} />
+        <Stat title={'\u041c\u0435\u0434\u0438\u0430\u043d\u0430'} value={formatNumber(entry.stats.median)} />
+      </div>
+    </div>
+  );
+}
+
 function Stat({
   title,
   value
@@ -428,4 +499,119 @@ function getHoverCursorValue(snapshot: ChartHoverSnapshot | null, testId: number
     return null;
   }
   return item.cursorValue;
+}
+
+type StatGroup =
+  | {
+      kind: 'linked';
+      link: ParameterLink;
+      entries: ChartTestStats[];
+      averageEfficiency: number | null;
+      cursorEfficiency: number | null;
+    }
+  | {
+      kind: 'single';
+      entry: ChartTestStats;
+    };
+
+function buildStatGroups(
+  entries: ChartTestStats[],
+  parameterLinks: ParameterLink[],
+  selectedTestIds: number[],
+  selectedObjectKeys: string[],
+  data: ChartDataset | null,
+  hoverSnapshot: ChartHoverSnapshot | null
+): StatGroup[] {
+  const entryById = new Map(entries.map((entry) => [entry.testId, entry]));
+  const selected = new Set(selectedTestIds);
+  const used = new Set<number>();
+  const groups: StatGroup[] = [];
+
+  for (const link of parameterLinks) {
+    if (!selected.has(link.inputTestId) || !selected.has(link.outputTestId)) {
+      continue;
+    }
+
+    const input = entryById.get(link.inputTestId);
+    const output = entryById.get(link.outputTestId);
+    if (!input || !output) {
+      continue;
+    }
+
+    groups.push({
+      kind: 'linked',
+      link,
+      entries: [input, output],
+      averageEfficiency: calculateAverageEfficiency(data, link, selectedObjectKeys),
+      cursorEfficiency: calculateEfficiency(
+        getHoverCursorValue(hoverSnapshot, input.testId),
+        getHoverCursorValue(hoverSnapshot, output.testId)
+      )
+    });
+    used.add(input.testId);
+    used.add(output.testId);
+  }
+
+  for (const entry of entries) {
+    if (!used.has(entry.testId)) {
+      groups.push({ kind: 'single', entry });
+    }
+  }
+
+  return groups;
+}
+
+function calculateAverageEfficiency(
+  data: ChartDataset | null,
+  link: ParameterLink,
+  selectedObjectKeys: string[]
+): number | null {
+  if (!data) {
+    return null;
+  }
+
+  const allowedObjectKeys = new Set(
+    selectedObjectKeys.length > 0
+      ? selectedObjectKeys
+      : data.objects.map((object) => object.objectKey)
+  );
+  const values = data.points
+    .flatMap((point) => {
+      const objectKeys = Array.from(new Set(point.values.map((item) => item.objectKey))).filter(
+        (objectKey) => allowedObjectKeys.has(objectKey)
+      );
+      return objectKeys.map((objectKey) => {
+        const input = findPointValue(point.values, link.inputTestId, objectKey);
+        const output = findPointValue(point.values, link.outputTestId, objectKey);
+        return calculateEfficiency(input, output);
+      });
+    })
+    .filter((value): value is number => value !== null);
+
+  if (values.length === 0) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function findPointValue(
+  values: ChartDataset['points'][number]['values'],
+  testId: number,
+  objectKey: string
+): number | null {
+  return values.find((item) => item.testId === testId && item.objectKey === objectKey)?.value ?? null;
+}
+
+function calculateEfficiency(input: number | null, output: number | null): number | null {
+  if (input === null || output === null || input === 0) {
+    return null;
+  }
+  return ((input - output) / input) * 100;
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return '—';
+  }
+  return `${formatNumber(value, 1)}%`;
 }

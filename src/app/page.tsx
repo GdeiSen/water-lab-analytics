@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { MainArea } from "@/components/layout/MainArea";
+import { InterfaceSettingsMenu } from "@/components/layout/InterfaceSettingsMenu";
 import { RightSidebar } from "@/components/layout/RightSidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +26,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useChartData } from "@/hooks/useChartData";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { AUTH_BYPASS_ENABLED } from "@/lib/app-config";
+import { buildParameterLinks } from "@/lib/parameter-links";
 import { api, isTauriRuntime, pickExportPath } from "@/lib/tauri-api";
 import type {
   ChartDataset,
@@ -200,15 +202,16 @@ export default function Page() {
   );
 
   const availableObjects = useMemo(() => {
+    if (fileDetails?.objects && fileDetails.objects.length > 0) {
+      return fileDetails.objects;
+    }
     if (chartData?.objects && chartData.objects.length > 0) {
       return chartData.objects.map((item) => ({
         key: item.objectKey,
         label: item.objectLabel,
         order: item.objectOrder,
+        active: item.objectActive,
       }));
-    }
-    if (fileDetails?.objects && fileDetails.objects.length > 0) {
-      return fileDetails.objects;
     }
 
     const maxObjectCount = files.reduce(
@@ -219,6 +222,7 @@ export default function Page() {
       key: String(index + 1),
       label: String(index + 1),
       order: index + 1,
+      active: true,
     }));
   }, [chartData?.objects, fileDetails?.objects, files]);
 
@@ -226,6 +230,8 @@ export default function Page() {
     const unique = new Set(files.map((file) => file.date));
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [files]);
+
+  const parameterLinks = useMemo(() => buildParameterLinks(testTypes), [testTypes]);
 
   const effectiveSelectedTestIds = useMemo(() => {
     const available = new Set(testTypes.map((item) => item.id));
@@ -603,6 +609,7 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-2">
+            <InterfaceSettingsMenu />
             {!authBypassEnabled && (
               <Button variant="danger" onClick={logout}>
                 <LogOut className="mr-2 h-4 w-4" />
@@ -677,6 +684,7 @@ export default function Page() {
           <MainArea
             selectedTestIds={effectiveSelectedTestIds}
             selectedObjectKeys={effectiveSelectedObjectKeys}
+            parameterLinks={parameterLinks}
             availableDates={availableDates}
             dateRange={dateRange}
             onDateRangeChange={setDateRange}
@@ -713,6 +721,7 @@ export default function Page() {
               testTypes={testTypes}
               selectedTestIds={effectiveSelectedTestIds}
               onSelectTests={setSelectedTestIds}
+              parameterLinks={parameterLinks}
               availableObjects={availableObjects}
               selectedObjectKeys={effectiveSelectedObjectKeys}
               onChangeObjects={setSelectedObjectKeys}

@@ -13,6 +13,7 @@ export function useChartData() {
   const {
     archiveSummary,
     selectedTestIds,
+    selectedObjectKeys,
     dateRange,
     setChartData,
     setStatusMessage
@@ -30,7 +31,7 @@ export function useChartData() {
         const chart = await api.getChartData(session.token, {
           archiveId: archiveSummary.archiveId,
           testIds: selectedTestIds,
-          objectKeys: [],
+          objectKeys: selectedObjectKeys,
           dateFrom: dateRange.from,
           dateTo: dateRange.to
         });
@@ -56,6 +57,7 @@ export function useChartData() {
     archiveSummary,
     dateRange.from,
     dateRange.to,
+    selectedObjectKeys,
     selectedTestIds,
     session,
     setChartData,
