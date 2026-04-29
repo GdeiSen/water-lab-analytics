@@ -4949,7 +4949,7 @@ dependencies = [
 
 [[package]]
 name = "water-lab-analytics"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "argon2",
  "base64 0.22.1",
