@@ -53,7 +53,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WLA_LICENSE_REQUIRED: ${{ secrets.WLA_LICENSE_REQUIRED }}
+          WLA_LICENSE_REQUIRED: ${{ contains(github.ref_name, 'community') && '0' || secrets.WLA_LICENSE_REQUIRED }}
           WLA_LICENSE_PUBLIC_KEY: ${{ secrets.WLA_LICENSE_PUBLIC_KEY }}
           WLA_LICENSE_API_URL: ${{ secrets.WLA_LICENSE_API_URL }}
         with:
