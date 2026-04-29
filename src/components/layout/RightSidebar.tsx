@@ -20,6 +20,8 @@ interface RightSidebarProps {
   selectedTestIds: number[];
   onSelectTests: (ids: number[]) => void;
   parameterLinks: ParameterLink[];
+  pendingLinkTestId?: number | null;
+  onToggleParameterLink?: (testId: number) => void;
   availableObjects: TechnologicalObject[];
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
@@ -37,6 +39,8 @@ export function RightSidebar({
   selectedTestIds,
   onSelectTests,
   parameterLinks,
+  pendingLinkTestId = null,
+  onToggleParameterLink,
   availableObjects,
   selectedObjectKeys,
   onChangeObjects,
@@ -128,6 +132,8 @@ export function RightSidebar({
                   selectedTestIds={selectedTestIds}
                   onChange={onSelectTests}
                   parameterLinks={parameterLinks}
+                  pendingLinkTestId={pendingLinkTestId}
+                  onToggleParameterLink={onToggleParameterLink}
                 />
               </div>
             </>

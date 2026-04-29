@@ -37,6 +37,7 @@ import type {
   ExcelCellValue,
   ExcelExportPayload,
   LicenseStatus,
+  ParameterLink,
 } from "@/lib/types";
 import { useDataStore } from "@/stores/data-store";
 
@@ -75,6 +76,9 @@ export default function Page() {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(true);
   const [licenseError, setLicenseError] = useState<string | null>(null);
+  const [manualParameterLinks, setManualParameterLinks] = useState<ParameterLink[]>([]);
+  const [disabledAutoParameterLinkIds, setDisabledAutoParameterLinkIds] = useState<string[]>([]);
+  const [pendingLinkTestId, setPendingLinkTestId] = useState<number | null>(null);
   const [sidebarResize, setSidebarResize] = useState<SidebarResizeState | null>(
     null,
   );
@@ -236,7 +240,106 @@ export default function Page() {
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [files]);
 
-  const parameterLinks = useMemo(() => buildParameterLinks(testTypes), [testTypes]);
+  const autoParameterLinks = useMemo(() => buildParameterLinks(testTypes), [testTypes]);
+  const parameterLinks = useMemo(() => {
+    const disabled = new Set(disabledAutoParameterLinkIds);
+    const effectiveAuto = autoParameterLinks.filter((link) => !disabled.has(link.id));
+    const usedIds = new Set(effectiveAuto.map((link) => link.id));
+    const effectiveManual = manualParameterLinks.filter((link) => !usedIds.has(link.id));
+    return [...effectiveAuto, ...effectiveManual];
+  }, [autoParameterLinks, disabledAutoParameterLinkIds, manualParameterLinks]);
+
+  useEffect(() => {
+    const availableIds = new Set(testTypes.map((test) => test.id));
+    setManualParameterLinks((links) =>
+      links.filter(
+        (link) => availableIds.has(link.inputTestId) && availableIds.has(link.outputTestId),
+      ),
+    );
+    setDisabledAutoParameterLinkIds((ids) =>
+      ids.filter((id) => autoParameterLinks.some((link) => link.id === id)),
+    );
+    setPendingLinkTestId((id) => (id && availableIds.has(id) ? id : null));
+  }, [autoParameterLinks, testTypes]);
+
+  const handleToggleParameterLink = useCallback(
+    (testId: number) => {
+      const selected = new Set(selectedTestIds);
+      const activeLinks = parameterLinks.filter(
+        (link) =>
+          selected.has(link.inputTestId) &&
+          selected.has(link.outputTestId) &&
+          (link.inputTestId === testId || link.outputTestId === testId),
+      );
+
+      if (activeLinks.length > 0) {
+        const autoLinks = activeLinks.filter((link) => link.source === "auto");
+        const manualLinks = activeLinks.filter((link) => link.source === "manual");
+
+        if (autoLinks.length > 0) {
+          setDisabledAutoParameterLinkIds((ids) =>
+            Array.from(new Set([...ids, ...autoLinks.map((link) => link.id)])),
+          );
+        }
+        if (manualLinks.length > 0) {
+          const removedIds = new Set(manualLinks.map((link) => link.id));
+          setManualParameterLinks((links) => links.filter((link) => !removedIds.has(link.id)));
+        }
+        setPendingLinkTestId(null);
+        return;
+      }
+
+      if (pendingLinkTestId === null) {
+        setPendingLinkTestId(testId);
+        return;
+      }
+
+      if (pendingLinkTestId === testId) {
+        setPendingLinkTestId(null);
+        return;
+      }
+
+      const input = testTypes.find((test) => test.id === pendingLinkTestId);
+      const output = testTypes.find((test) => test.id === testId);
+      if (!input || !output) {
+        setPendingLinkTestId(null);
+        return;
+      }
+
+      const autoLink = autoParameterLinks.find((link) =>
+        isSameParameterPair(link.inputTestId, link.outputTestId, input.id, output.id),
+      );
+      if (autoLink) {
+        setDisabledAutoParameterLinkIds((ids) => ids.filter((id) => id !== autoLink.id));
+      } else {
+        const [firstId, secondId] = [input.id, output.id].sort((left, right) => left - right);
+        const nextLink: ParameterLink = {
+          id: `manual-${firstId}-${secondId}`,
+          label: buildManualParameterLinkLabel(input.displayName, output.displayName),
+          inputTestId: input.id,
+          inputTestName: input.displayName,
+          outputTestId: output.id,
+          outputTestName: output.displayName,
+          source: "manual",
+        };
+        setManualParameterLinks((links) => [
+          ...links.filter((link) => link.id !== nextLink.id),
+          nextLink,
+        ]);
+      }
+
+      setSelectedTestIds(Array.from(new Set([...selectedTestIds, input.id, output.id])));
+      setPendingLinkTestId(null);
+    },
+    [
+      autoParameterLinks,
+      parameterLinks,
+      pendingLinkTestId,
+      selectedTestIds,
+      setSelectedTestIds,
+      testTypes,
+    ],
+  );
 
   const refreshLicenseStatus = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -830,6 +933,8 @@ export default function Page() {
               selectedTestIds={effectiveSelectedTestIds}
               onSelectTests={setSelectedTestIds}
               parameterLinks={parameterLinks}
+              pendingLinkTestId={pendingLinkTestId}
+              onToggleParameterLink={handleToggleParameterLink}
               availableObjects={availableObjects}
               selectedObjectKeys={effectiveSelectedObjectKeys}
               onChangeObjects={setSelectedObjectKeys}
@@ -891,6 +996,38 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error;
   }
   return fallback;
+}
+
+function buildManualParameterLinkLabel(inputName: string, outputName: string): string {
+  const input = normalizeParameterLinkName(inputName);
+  const output = normalizeParameterLinkName(outputName);
+  if (input && output && input === output) {
+    return input;
+  }
+  return `${inputName} -> ${outputName}`;
+}
+
+function isSameParameterPair(
+  leftInputId: number,
+  leftOutputId: number,
+  rightInputId: number,
+  rightOutputId: number,
+): boolean {
+  return (
+    (leftInputId === rightInputId && leftOutputId === rightOutputId) ||
+    (leftInputId === rightOutputId && leftOutputId === rightInputId)
+  );
+}
+
+function normalizeParameterLinkName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[.,;:]+/g, " ")
+    .replace(/\s+на\s+входе\s+/g, " ")
+    .replace(/\s+на\s+выходе\s+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildExportDefaultName(prefix: string, extension: string): string {

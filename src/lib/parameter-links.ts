@@ -31,7 +31,8 @@ export function buildParameterLinks(testTypes: TestType[]): ParameterLink[] {
         inputTestId: input.test.id,
         inputTestName: input.test.displayName,
         outputTestId: output.test.id,
-        outputTestName: output.test.displayName
+        outputTestName: output.test.displayName,
+        source: 'auto'
       };
     });
 }

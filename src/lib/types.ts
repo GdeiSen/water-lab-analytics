@@ -90,6 +90,7 @@ export interface ParameterLink {
   inputTestName: string;
   outputTestId: number;
   outputTestName: string;
+  source: 'auto' | 'manual';
 }
 
 export interface ChartTest {

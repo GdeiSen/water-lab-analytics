@@ -10,6 +10,8 @@ interface ToolbarProps {
   selectedTestIds: number[];
   onSelectTests: (ids: number[]) => void;
   parameterLinks?: ParameterLink[];
+  pendingLinkTestId?: number | null;
+  onToggleParameterLink?: (testId: number) => void;
   availableObjects: TechnologicalObject[];
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
@@ -24,6 +26,8 @@ export function Toolbar({
   selectedTestIds,
   onSelectTests,
   parameterLinks = [],
+  pendingLinkTestId = null,
+  onToggleParameterLink,
   availableObjects,
   selectedObjectKeys,
   onChangeObjects,
@@ -40,6 +44,8 @@ export function Toolbar({
           selectedTestIds={selectedTestIds}
           onChange={onSelectTests}
           parameterLinks={parameterLinks}
+          pendingLinkTestId={pendingLinkTestId}
+          onToggleParameterLink={onToggleParameterLink}
         />
         <ObjectSelector objects={availableObjects} selectedKeys={selectedObjectKeys} onChange={onChangeObjects} />
         <div className="flex items-end">
