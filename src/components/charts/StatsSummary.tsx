@@ -5,6 +5,7 @@ import { FileDown, Maximize2, Minimize2, Search } from 'lucide-react';
 
 import type {
   ChartDataset,
+  ChartGuideMode,
   ChartHoverSnapshot,
   ChartTestStats,
   ParameterLink
@@ -18,6 +19,7 @@ interface StatsSummaryProps {
   selectedTestIds: number[];
   selectedObjectKeys: string[];
   parameterLinks: ParameterLink[];
+  guideMode: ChartGuideMode;
   onExportExcel: () => void;
 }
 
@@ -45,6 +47,7 @@ export function StatsSummary({
   selectedTestIds,
   selectedObjectKeys,
   parameterLinks,
+  guideMode,
   onExportExcel
 }: StatsSummaryProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -206,10 +209,11 @@ export function StatsSummary({
         parameterLinks,
         selectedTestIds,
         selectedObjectKeys,
+        guideMode,
         data,
         hoverSnapshot
       ),
-    [data, hoverSnapshot, parameterLinks, selectedObjectKeys, selectedTestIds, statsEntries]
+    [data, guideMode, hoverSnapshot, parameterLinks, selectedObjectKeys, selectedTestIds, statsEntries]
   );
 
   const toggleSort = (key: 'date' | string) => {
@@ -274,10 +278,15 @@ export function StatsSummary({
                       Эффективность: {group.link.label}
                     </p>
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="border border-ink/15 bg-white px-2 py-0.5">
+                      <span className="border bg-white px-2 py-0.5 font-semibold text-surge"
+                        style={{ borderColor: '#0b7a75', color: '#0b7a75' }}
+                      >
                         Средняя: {formatPercent(group.averageEfficiency)}
                       </span>
-                      <span className="border border-ink/15 bg-white px-2 py-0.5">
+                      <span
+                        className="border bg-white px-2 py-0.5 font-semibold text-surge"
+                        style={{ borderColor: '#0b7a75', color: '#0b7a75' }}
+                      >
                         {formatPercent(group.cursorEfficiency)}
                       </span>
                     </div>
@@ -519,6 +528,7 @@ function buildStatGroups(
   parameterLinks: ParameterLink[],
   selectedTestIds: number[],
   selectedObjectKeys: string[],
+  guideMode: ChartGuideMode,
   data: ChartDataset | null,
   hoverSnapshot: ChartHoverSnapshot | null
 ): StatGroup[] {
@@ -542,11 +552,8 @@ function buildStatGroups(
       kind: 'linked',
       link,
       entries: [input, output],
-      averageEfficiency: calculateAverageEfficiency(data, link, selectedObjectKeys),
-      cursorEfficiency: calculateEfficiency(
-        getHoverCursorValue(hoverSnapshot, input.testId),
-        getHoverCursorValue(hoverSnapshot, output.testId)
-      )
+      averageEfficiency: calculateAverageEfficiency(data, link, selectedObjectKeys, guideMode),
+      cursorEfficiency: calculateCursorEfficiency(data, hoverSnapshot, link, selectedObjectKeys, guideMode)
     });
     used.add(input.testId);
     used.add(output.testId);
@@ -564,7 +571,8 @@ function buildStatGroups(
 function calculateAverageEfficiency(
   data: ChartDataset | null,
   link: ParameterLink,
-  selectedObjectKeys: string[]
+  selectedObjectKeys: string[],
+  guideMode: ChartGuideMode
 ): number | null {
   if (!data) {
     return null;
@@ -576,22 +584,85 @@ function calculateAverageEfficiency(
       : data.objects.map((object) => object.objectKey)
   );
   const values = data.points
-    .flatMap((point) => {
-      const objectKeys = Array.from(new Set(point.values.map((item) => item.objectKey))).filter(
-        (objectKey) => allowedObjectKeys.has(objectKey)
-      );
-      return objectKeys.map((objectKey) => {
-        const input = findPointValue(point.values, link.inputTestId, objectKey);
-        const output = findPointValue(point.values, link.outputTestId, objectKey);
-        return calculateEfficiency(input, output);
-      });
-    })
+    .map((point) => calculatePointEfficiency(point.values, link, allowedObjectKeys, guideMode))
     .filter((value): value is number => value !== null);
 
   if (values.length === 0) {
     return null;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function calculateCursorEfficiency(
+  data: ChartDataset | null,
+  hoverSnapshot: ChartHoverSnapshot | null,
+  link: ParameterLink,
+  selectedObjectKeys: string[],
+  guideMode: ChartGuideMode
+): number | null {
+  if (!data || !hoverSnapshot) {
+    return null;
+  }
+
+  if (guideMode === 'average') {
+    return calculateEfficiency(
+      getHoverCursorValue(hoverSnapshot, link.inputTestId),
+      getHoverCursorValue(hoverSnapshot, link.outputTestId)
+    );
+  }
+
+  const point = data.points.find((item) => item.date === hoverSnapshot.date);
+  if (!point) {
+    return null;
+  }
+  const allowedObjectKeys = new Set(
+    selectedObjectKeys.length > 0
+      ? selectedObjectKeys
+      : data.objects.map((object) => object.objectKey)
+  );
+  return calculatePointEfficiency(point.values, link, allowedObjectKeys, 'series');
+}
+
+function calculatePointEfficiency(
+  values: ChartDataset['points'][number]['values'],
+  link: ParameterLink,
+  allowedObjectKeys: Set<string>,
+  guideMode: ChartGuideMode
+): number | null {
+  if (guideMode === 'average') {
+    const inputAverage = averageValues(values, link.inputTestId, allowedObjectKeys);
+    const outputAverage = averageValues(values, link.outputTestId, allowedObjectKeys);
+    return calculateEfficiency(inputAverage, outputAverage);
+  }
+
+  const efficiencies = Array.from(allowedObjectKeys)
+    .map((objectKey) => {
+      const input = findPointValue(values, link.inputTestId, objectKey);
+      const output = findPointValue(values, link.outputTestId, objectKey);
+      return calculateEfficiency(input, output);
+    })
+    .filter((value): value is number => value !== null);
+
+  if (efficiencies.length === 0) {
+    return null;
+  }
+  return efficiencies.reduce((sum, value) => sum + value, 0) / efficiencies.length;
+}
+
+function averageValues(
+  values: ChartDataset['points'][number]['values'],
+  testId: number,
+  allowedObjectKeys: Set<string>
+): number | null {
+  const numeric = values
+    .filter((item) => item.testId === testId && allowedObjectKeys.has(item.objectKey))
+    .map((item) => item.value)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+
+  if (numeric.length === 0) {
+    return null;
+  }
+  return numeric.reduce((sum, value) => sum + value, 0) / numeric.length;
 }
 
 function findPointValue(

@@ -1,6 +1,6 @@
 {
   "name": "water-lab-analytics",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,10 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:portable": "tauri build --bundles none"
+    "tauri:portable": "tauri build --bundles none",
+    "license:keypair": "node scripts/license-keypair.mjs",
+    "license:generate": "node scripts/generate-license.mjs",
+    "license:hash-key": "node scripts/hash-license-key.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.0",

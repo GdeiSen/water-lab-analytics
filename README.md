@@ -75,6 +75,10 @@ npm run build
 npm run tauri:build
 ```
 
+## Licensing
+
+License activation setup is documented in [`docs/LICENSE_ACTIVATION.md`](docs/LICENSE_ACTIVATION.md).
+
 ## Checks
 
 ```bash

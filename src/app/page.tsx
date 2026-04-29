@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { LoginForm } from "@/components/auth/LoginForm";
+import { LicenseActivationScreen } from "@/components/license/LicenseActivationScreen";
 import { MainArea } from "@/components/layout/MainArea";
 import { InterfaceSettingsMenu } from "@/components/layout/InterfaceSettingsMenu";
 import { RightSidebar } from "@/components/layout/RightSidebar";
@@ -35,6 +36,7 @@ import type {
   ChartGuideMode,
   ExcelCellValue,
   ExcelExportPayload,
+  LicenseStatus,
 } from "@/lib/types";
 import { useDataStore } from "@/stores/data-store";
 
@@ -70,6 +72,9 @@ export default function Page() {
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [guideMode, setGuideMode] = useState<ChartGuideMode>("series");
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseLoading, setLicenseLoading] = useState(true);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
   const [sidebarResize, setSidebarResize] = useState<SidebarResizeState | null>(
     null,
   );
@@ -232,6 +237,74 @@ export default function Page() {
   }, [files]);
 
   const parameterLinks = useMemo(() => buildParameterLinks(testTypes), [testTypes]);
+
+  const refreshLicenseStatus = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setLicenseStatus({
+        required: false,
+        active: true,
+        fingerprint: "browser-dev",
+        customerName: null,
+        licenseId: null,
+        expiresAt: null,
+        source: null,
+        message: "Лицензирование отключено в браузерном режиме разработки",
+      });
+      setLicenseLoading(false);
+      return;
+    }
+
+    setLicenseLoading(true);
+    setLicenseError(null);
+    try {
+      const nextStatus = await api.getLicenseStatus();
+      setLicenseStatus(nextStatus);
+    } catch (error) {
+      setLicenseError(
+        error instanceof Error ? error.message : "Не удалось проверить лицензию",
+      );
+    } finally {
+      setLicenseLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLicenseStatus();
+  }, [refreshLicenseStatus]);
+
+  const handleOnlineLicenseActivation = useCallback(
+    async (licenseKey: string) => {
+      setLicenseLoading(true);
+      setLicenseError(null);
+      try {
+        const nextStatus = await api.activateLicenseOnline(licenseKey);
+        setLicenseStatus(nextStatus);
+        toast.success("Лицензия активирована");
+      } catch (error) {
+        setLicenseError(getErrorMessage(error, "Не удалось активировать лицензию"));
+      } finally {
+        setLicenseLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleOfflineLicenseActivation = useCallback(
+    async (token: string) => {
+      setLicenseLoading(true);
+      setLicenseError(null);
+      try {
+        const nextStatus = await api.activateLicenseOffline(token);
+        setLicenseStatus(nextStatus);
+        toast.success("Лицензия активирована");
+      } catch (error) {
+        setLicenseError(getErrorMessage(error, "Не удалось активировать лицензию"));
+      } finally {
+        setLicenseLoading(false);
+      }
+    },
+    [],
+  );
 
   const effectiveSelectedTestIds = useMemo(() => {
     const available = new Set(testTypes.map((item) => item.id));
@@ -560,6 +633,41 @@ export default function Page() {
     [rightPanelWidth],
   );
 
+  if (licenseLoading && !licenseStatus) {
+    return (
+      <AuthProvider>
+        <div className="flex min-h-screen items-center justify-center bg-[#f1f3f5] px-4">
+          <div className="w-full max-w-md border border-ink/25 bg-white p-6 text-center">
+            <div className="mb-6 flex justify-center">
+              <Spinner size="lg" />
+            </div>
+            <p className="text-xs uppercase tracking-[0.2em] text-ink/60">
+              Water Lab Analytics
+            </p>
+            <h1 className="mt-2 text-xl font-semibold text-ink">
+              Проверка лицензии
+            </h1>
+          </div>
+        </div>
+      </AuthProvider>
+    );
+  }
+
+  if (licenseStatus?.required && !licenseStatus.active) {
+    return (
+      <AuthProvider>
+        <LicenseActivationScreen
+          status={licenseStatus}
+          loading={licenseLoading}
+          error={licenseError}
+          onOnlineActivate={handleOnlineLicenseActivation}
+          onOfflineActivate={handleOfflineLicenseActivation}
+          onRefresh={refreshLicenseStatus}
+        />
+      </AuthProvider>
+    );
+  }
+
   if (!session) {
     if (authBypassEnabled || AUTH_BYPASS_ENABLED) {
       return (
@@ -773,6 +881,16 @@ function resolveResizeDraft(
     width,
     guideX,
   };
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return fallback;
 }
 
 function buildExportDefaultName(prefix: string, extension: string): string {

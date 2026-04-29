@@ -66,15 +66,11 @@ export function TestTypeSelect({
       <div className="space-y-1">
         {sorted.map((test) => {
           const activePair = activePairByTestId.get(test.id);
-          const isPairInput = activePair?.inputTestId === test.id;
           return (
             <label
               key={test.id}
               className="relative flex cursor-pointer items-center gap-2 border border-transparent px-1.5 py-1 text-xs hover:border-ink/20"
             >
-              {activePair && isPairInput && (
-                <span className="absolute right-[13px] top-[22px] h-5 border-r border-dashed border-surge/80" />
-              )}
               <input
                 type="checkbox"
                 checked={selectedTestIds.includes(test.id)}

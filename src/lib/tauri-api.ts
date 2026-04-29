@@ -12,6 +12,7 @@ import type {
   FileDetails,
   FileErrorEvent,
   FileInfo,
+  LicenseStatus,
   ParseProgress,
   TestType
 } from '@/lib/types';
@@ -63,6 +64,26 @@ export async function pickExportPath(
 }
 
 export const api = {
+  async getLicenseStatus(): Promise<LicenseStatus> {
+    assertTauri();
+    return invoke<LicenseStatus>('get_license_status');
+  },
+
+  async activateLicenseOnline(licenseKey: string): Promise<LicenseStatus> {
+    assertTauri();
+    return invoke<LicenseStatus>('activate_license_online', { licenseKey });
+  },
+
+  async activateLicenseOffline(token: string): Promise<LicenseStatus> {
+    assertTauri();
+    return invoke<LicenseStatus>('activate_license_offline', { token });
+  },
+
+  async clearLicense(): Promise<LicenseStatus> {
+    assertTauri();
+    return invoke<LicenseStatus>('clear_license');
+  },
+
   async login(username: string, password: string): Promise<AuthToken> {
     assertTauri();
     return invoke<AuthToken>('login', { username, password });

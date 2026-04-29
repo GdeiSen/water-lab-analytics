@@ -177,6 +177,7 @@ export function MainArea({
           selectedTestIds={selectedTestIds}
           selectedObjectKeys={selectedObjectKeys}
           parameterLinks={parameterLinks}
+          guideMode={guideMode}
           onExportExcel={onExportExcel}
         />
       </div>

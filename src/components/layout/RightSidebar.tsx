@@ -11,7 +11,7 @@ import type {
   TechnologicalObject,
   TestType,
 } from "@/lib/types";
-import { ChartControls } from "@/components/charts/ChartControls";
+import { AnalysisModeControl, ChartControls } from "@/components/charts/ChartControls";
 import { ObjectSelector } from "@/components/filters/ObjectSelector";
 import { TestTypeSelect } from "@/components/filters/TestTypeSelect";
 
@@ -51,6 +51,7 @@ export function RightSidebar({
   const [openSections, setOpenSections] = useState({
     test: true,
     tanks: true,
+    analysis: true,
     average: true,
     optimization: true,
   });
@@ -130,6 +131,37 @@ export function RightSidebar({
                 />
               </div>
             </>
+          )}
+        </section>
+
+        <section className="min-w-0 space-y-2 border border-ink/15 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink/70">
+              Режим анализа
+            </p>
+            <button
+              type="button"
+              className="text-ink/60 transition hover:text-ink"
+              onClick={() => toggleSection("analysis")}
+              title={openSections.analysis ? "Свернуть" : "Развернуть"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${openSections.analysis ? "rotate-180" : "rotate-0"}`}
+              />
+            </button>
+          </div>
+          {openSections.analysis && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-ink/50">
+                Выберите, как считать вспомогательные значения и эффективность: по точкам графиков
+                или по средним линиям.
+              </p>
+              <AnalysisModeControl
+                showAverage={showAverage}
+                guideMode={guideMode}
+                onGuideModeChange={onGuideModeChange}
+              />
+            </div>
           )}
         </section>
 

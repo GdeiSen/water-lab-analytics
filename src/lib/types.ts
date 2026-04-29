@@ -6,6 +6,17 @@ export interface AuthToken {
   role: UserRole;
 }
 
+export interface LicenseStatus {
+  required: boolean;
+  active: boolean;
+  fingerprint: string;
+  customerName: string | null;
+  licenseId: string | null;
+  expiresAt: string | null;
+  source: string | null;
+  message: string | null;
+}
+
 export interface ArchiveSummary {
   archiveId: number;
   archivePath: string;
