@@ -23,12 +23,15 @@ import {
 import { format, parseISO } from "date-fns";
 
 import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
+import { computeTrendline } from "@/lib/trendlines";
 import type {
   ChartDataset,
   ChartGuideMode,
   ChartHoverSnapshot,
   ChartHoverTestStats,
   ChartOptimizationSettings,
+  ChartTrendlineReport,
+  ChartTrendlineSettings,
   ChartValuePoint,
   ChartTest,
 } from "@/lib/types";
@@ -41,9 +44,11 @@ interface TimeSeriesChartProps {
   showAverage: boolean;
   guideMode: ChartGuideMode;
   optimization: ChartOptimizationSettings;
+  trendline: ChartTrendlineSettings;
   height: number;
   uiScale: number;
   onHoverChange?: (snapshot: ChartHoverSnapshot | null) => void;
+  onTrendlinesChange?: (reports: ChartTrendlineReport[]) => void;
   onExportPng?: () => void;
   onPrintChart?: () => void;
 }
@@ -61,6 +66,24 @@ interface SeriesMeta {
   objectLabel: string;
   key: string;
   color: string;
+}
+
+interface TrendlineMeta {
+  key: string;
+  dataKey: string;
+  testId: number;
+  label: string;
+  color: string;
+  report: ChartTrendlineReport;
+}
+
+interface PreparedChart {
+  rows: ChartRow[];
+  sourceRows: ChartRow[];
+  tests: ChartTest[];
+  series: SeriesMeta[];
+  trendlines: TrendlineMeta[];
+  visibleAverageTestIds: Set<number>;
 }
 
 interface PreparedChart {
@@ -106,6 +129,7 @@ interface HoverGuideState {
   date: string;
   averageByTest: Record<number, number | null>;
   seriesByKey: Record<string, number | null>;
+  trendByTest: Record<number, number | null>;
 }
 
 interface GuideValueSpec {
@@ -133,9 +157,11 @@ export function TimeSeriesChart({
   showAverage,
   guideMode,
   optimization,
+  trendline,
   height,
   uiScale,
   onHoverChange,
+  onTrendlinesChange,
   onExportPng,
   onPrintChart,
 }: TimeSeriesChartProps) {
@@ -151,6 +177,8 @@ export function TimeSeriesChart({
   const [axisTickCounts, setAxisTickCounts] = useState<Record<string, number>>(
     {},
   );
+  const [hoveredLegendKey, setHoveredLegendKey] = useState<string | null>(null);
+  const [hiddenSeriesKeys, setHiddenSeriesKeys] = useState<Set<string>>(new Set());
 
   const clearInteractions = useCallback(() => {
     setHoverGuide(null);
@@ -196,12 +224,23 @@ export function TimeSeriesChart({
     return map;
   }, [selectedTests]);
 
+  const trendColorById = useMemo(() => {
+    const map = new Map<number, string>();
+    selectedTests.forEach((test, index) => {
+      map.set(test.testId, darkenColor(TANK_COLORS[index % TANK_COLORS.length], 0.38));
+    });
+    return map;
+  }, [selectedTests]);
+
   const prepared = useMemo(() => {
     if (!data || selectedTests.length === 0) {
       return {
         rows: [],
+        sourceRows: [],
         tests: selectedTests,
         series: [],
+        trendlines: [],
+        visibleAverageTestIds: new Set<number>(),
       } satisfies PreparedChart;
     }
 
@@ -213,8 +252,10 @@ export function TimeSeriesChart({
         objectLabel: object.objectLabel,
         key: getSeriesKey(test.testId, object.objectKey),
         color:
-          testColorById.get(test.testId) ??
-          TANK_COLORS[(testIndex + objectIndex) % TANK_COLORS.length],
+          TANK_COLORS[
+            (testIndex * selectedObjects.length + objectIndex) %
+              TANK_COLORS.length
+          ],
       })),
     );
 
@@ -246,9 +287,21 @@ export function TimeSeriesChart({
             ? selectedAverage
             : (averageMap.get(getAverageKey(test.testId)) ?? null);
       }
+      for (const object of selectedObjects) {
+        row[getObjectAverageKey(object.objectKey)] =
+          calculateAverageForSelectedTests(
+            point.values,
+            object.objectKey,
+            selectedTests,
+          );
+      }
 
       return row;
     });
+
+    const objectAverageKeys = selectedObjects.map((object) =>
+      getObjectAverageKey(object.objectKey),
+    );
 
     const effective = resolveEffectiveOptimization(
       optimization,
@@ -257,7 +310,7 @@ export function TimeSeriesChart({
     const seriesKeys = series.map((item) => item.key);
     const compressed = compressRows(
       baseRows,
-      [...seriesKeys, ...averageKeys],
+      [...seriesKeys, ...averageKeys, ...objectAverageKeys],
       effective.pointCompression,
     );
 
@@ -294,12 +347,64 @@ export function TimeSeriesChart({
       });
     }
 
+    for (const object of selectedObjects) {
+      const objAvgKey = getObjectAverageKey(object.objectKey);
+      const baseObjectAvg = compressed.map((row) =>
+        toNullableNumber(row[objAvgKey]),
+      );
+      const approximatedObjectAvg = applyApproximation(
+        baseObjectAvg,
+        effective.averageApproximation,
+        {
+          movingAverageWindow: effective.averageMovingAverageWindow,
+          emaAlpha: effective.averageEmaAlpha,
+        },
+      );
+      approximatedObjectAvg.forEach((value, index) => {
+        compressed[index][objAvgKey] = value;
+      });
+    }
+
+    const localSeriesByTest = new Map<number, string[]>();
+    for (const item of series) {
+      if (!localSeriesByTest.has(item.testId)) {
+        localSeriesByTest.set(item.testId, []);
+      }
+      localSeriesByTest.get(item.testId)?.push(item.key);
+    }
+
+    const visibleAverageTestIds = new Set<number>();
+    for (const test of selectedTests) {
+      const averageKey = getAverageKey(test.testId);
+      const testSeriesKeys = localSeriesByTest.get(test.testId) ?? [];
+      const duplicatesSeries = testSeriesKeys.some((seriesKey) =>
+        seriesMatches(compressed, averageKey, seriesKey),
+      );
+
+      if (!duplicatesSeries) {
+        visibleAverageTestIds.add(test.testId);
+      }
+    }
+
+    const trendlines = buildTrendlines({
+      settings: trendline,
+      tests: selectedTests,
+      objects: selectedObjects,
+      sourceRows: baseRows,
+      displayRows: compressed,
+      visibleAverageTestIds,
+      testColorById,
+    });
+
     return {
       rows: compressed,
+      sourceRows: baseRows,
       tests: selectedTests,
       series,
+      trendlines,
+      visibleAverageTestIds,
     } satisfies PreparedChart;
-  }, [data, optimization, selectedObjects, selectedTests, testColorById]);
+  }, [data, optimization, selectedObjects, selectedTests, testColorById, trendline]);
 
   const seriesByTest = useMemo(() => {
     const map = new Map<number, string[]>();
@@ -312,23 +417,7 @@ export function TimeSeriesChart({
     return map;
   }, [prepared.series]);
 
-  const visibleAverageTestIds = useMemo(() => {
-    const visible = new Set<number>();
-
-    for (const test of prepared.tests) {
-      const averageKey = getAverageKey(test.testId);
-      const seriesKeys = seriesByTest.get(test.testId) ?? [];
-      const duplicatesSeries = seriesKeys.some((seriesKey) =>
-        seriesMatches(prepared.rows, averageKey, seriesKey),
-      );
-
-      if (!duplicatesSeries) {
-        visible.add(test.testId);
-      }
-    }
-
-    return visible;
-  }, [prepared.rows, prepared.tests, seriesByTest]);
+  const visibleAverageTestIds = prepared.visibleAverageTestIds;
 
   const axisLayout = useMemo(() => {
     const grouped = new Map<
@@ -343,6 +432,11 @@ export function TimeSeriesChart({
       const keys = [...(seriesByTest.get(test.testId) ?? [])];
       if (showAverage && visibleAverageTestIds.has(test.testId)) {
         keys.push(getAverageKey(test.testId));
+      }
+      for (const item of prepared.trendlines) {
+        if (item.testId === test.testId) {
+          keys.push(item.dataKey);
+        }
       }
       if (keys.length === 0) {
         continue;
@@ -399,6 +493,7 @@ export function TimeSeriesChart({
   }, [
     prepared.rows,
     prepared.tests,
+    prepared.trendlines,
     seriesByTest,
     showAverage,
     visibleAverageTestIds,
@@ -467,6 +562,10 @@ export function TimeSeriesChart({
     }
   }, [clearInteractions, data, selectedTestIds.length]);
 
+  useEffect(() => {
+    onTrendlinesChange?.(prepared.trendlines.map((item) => item.report));
+  }, [onTrendlinesChange, prepared.trendlines]);
+
   if (
     !data ||
     prepared.rows.length === 0 ||
@@ -497,6 +596,7 @@ export function TimeSeriesChart({
         testColorById,
         fallbackAxisId,
         showAverage,
+        trendColorById,
       })
     : [];
   const lockedGuideSpecs = lockedGuide
@@ -509,6 +609,7 @@ export function TimeSeriesChart({
         testColorById,
         fallbackAxisId,
         showAverage,
+        trendColorById,
       })
     : [];
   const isExpanded = isFullscreen || isPseudoFullscreen;
@@ -628,6 +729,13 @@ export function TimeSeriesChart({
           ? values.reduce((sum, value) => sum + value, 0) / values.length
           : null);
 
+      const trendItem = prepared.trendlines.find(
+        (item) => item.testId === test.testId,
+      );
+      const trendValue = trendItem
+        ? toNullableNumber(row[trendItem.dataKey])
+        : null;
+
       return {
         testId: test.testId,
         min: null,
@@ -636,6 +744,7 @@ export function TimeSeriesChart({
         median: null,
         stdDev: null,
         cursorValue: averageValue,
+        trendCursorValue: trendValue,
       } satisfies ChartHoverTestStats;
     });
 
@@ -649,11 +758,19 @@ export function TimeSeriesChart({
       seriesByKey[series.key] = toNullableNumber(row[series.key]);
     }
 
+    const trendByTest: Record<number, number | null> = {};
+    for (const item of prepared.trendlines) {
+      if (item.testId !== null) {
+        trendByTest[item.testId] = toNullableNumber(row[item.dataKey]);
+      }
+    }
+
     return {
       guide: {
         date: String(row.date),
         averageByTest: cursorByTest,
         seriesByKey,
+        trendByTest,
       },
       snapshot: {
         date: String(row.date),
@@ -805,46 +922,57 @@ export function TimeSeriesChart({
                 />
               ))}
 
-              {prepared.series.map((series) => (
-                <Line
-                  key={series.key}
-                  yAxisId={
-                    axisLayout.axisByTest.get(series.testId) ?? fallbackAxisId
+              {prepared.series.map((series) => {
+                  if (hiddenSeriesKeys.has(series.key)) {
+                    return null;
                   }
-                  type="monotone"
-                  dataKey={series.key}
-                  name={`${series.testName} / ${series.objectLabel}`}
-                  stroke={series.color}
-                  dot={false}
-                  isAnimationActive
-                  strokeWidth={1.8 * scale}
-                  connectNulls
-                />
-              ))}
-
-              {showAverage &&
-                prepared.tests.map((test) => (
-                  visibleAverageTestIds.has(test.testId) ? (
+                  const isDimmed =
+                    hoveredLegendKey !== null &&
+                    hoveredLegendKey !== series.key;
+                  return (
                     <Line
-                      key={`avg-${test.testId}`}
+                      key={series.key}
                       yAxisId={
-                        axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
+                        axisLayout.axisByTest.get(series.testId) ?? fallbackAxisId
                       }
                       type="monotone"
-                      dataKey={getAverageKey(test.testId)}
-                      name={`${test.testName} (среднее)`}
-                      stroke={darkenColor(
-                        testColorById.get(test.testId) ?? "#0f766e",
-                        0.22,
-                      )}
-                      strokeDasharray="6 4"
+                      dataKey={series.key}
+                      name={`${series.testName} / ${series.objectLabel}`}
+                      stroke={series.color}
                       dot={false}
                       isAnimationActive
-                      strokeWidth={2.2 * scale}
+                      strokeWidth={1.8 * scale}
                       connectNulls
+                      strokeOpacity={isDimmed ? 0.12 : 1}
                     />
-                  ) : null
-                ))}
+                  );
+                })}
+
+              {trendline.enabled &&
+                prepared.trendlines.map((item) => {
+                  const isSmoothing =
+                    item.report.mode === "moving_average" ||
+                    item.report.mode === "ema" ||
+                    item.report.mode === "linear_filter";
+                  return (
+                    <Line
+                      key={item.key}
+                      yAxisId={
+                        axisLayout.axisByTest.get(item.testId) ?? fallbackAxisId
+                      }
+                      type="monotone"
+                      dataKey={item.dataKey}
+                      name={`${item.label} (тренд)`}
+                      stroke={item.color}
+                      strokeDasharray={isSmoothing ? "6 4" : "3 3"}
+                      dot={false}
+                      isAnimationActive
+                      strokeWidth={(isSmoothing ? 2.2 : 1.6) * scale}
+                      connectNulls
+                      strokeOpacity={hoveredLegendKey !== null ? 0.12 : 1}
+                    />
+                  );
+                })}
 
               {activeGuide && (
                 <ReferenceLine
@@ -1079,26 +1207,46 @@ export function TimeSeriesChart({
                   fontSize: 11 * scale,
                 }}
               >
-                {prepared.tests.map((test) => (
-                  <div
-                    key={`legend-${test.testId}`}
-                    className="flex items-center"
-                    style={{ gap: 6 * scale }}
-                  >
-                    <span
-                      className="inline-block rounded-sm"
-                      style={{
-                        width: 20 * scale,
-                        height: 3 * scale,
-                        backgroundColor:
-                          testColorById.get(test.testId) ?? "#0f766e",
-                      }}
-                    />
-                    <span className="truncate" style={{ maxWidth: 280 * scale }}>
-                      {test.testName}
-                    </span>
-                  </div>
-                ))}
+                {prepared.series.map((item) => {
+                  const isHidden = hiddenSeriesKeys.has(item.key);
+                  return (
+                    <div
+                      key={`legend-${item.key}`}
+                      className={`flex cursor-pointer items-center px-1 py-0.5 ${
+                        isHidden
+                          ? 'text-ink/25'
+                          : 'border border-transparent text-ink/75 hover:border-ink/15 hover:bg-white'
+                      }`}
+                      style={{ gap: 6 * scale, borderRadius: 3 * scale }}
+                      title={`${item.testName} / ${item.objectLabel}${isHidden ? ' (скрыто)' : ''}`}
+                      onClick={() =>
+                        setHiddenSeriesKeys((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(item.key)) {
+                            next.delete(item.key);
+                          } else {
+                            next.add(item.key);
+                          }
+                          return next;
+                        })
+                      }
+                      onMouseEnter={() => setHoveredLegendKey(item.key)}
+                      onMouseLeave={() => setHoveredLegendKey(null)}
+                    >
+                      <span
+                        className="inline-block rounded-sm"
+                        style={{
+                          width: 20 * scale,
+                          height: 3 * scale,
+                          backgroundColor: isHidden ? '#9ca3af' : item.color,
+                        }}
+                      />
+                      <span className="truncate" style={{ maxWidth: 280 * scale }}>
+                        {item.testName} / {item.objectLabel}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex shrink-0 items-center" style={{ gap: 6 * scale }}>
                 <button
@@ -1153,6 +1301,110 @@ function getAverageKey(testId: number): string {
   return `average_${testId}`;
 }
 
+function getObjectAverageKey(objectKey: string): string {
+  return `objAvg_${objectKey}`;
+}
+
+function buildTrendlines({
+  settings,
+  tests,
+  objects,
+  sourceRows,
+  displayRows,
+  visibleAverageTestIds,
+  testColorById,
+}: {
+  settings: ChartTrendlineSettings;
+  tests: ChartTest[];
+  objects: Array<{ objectKey: string; objectLabel: string }>;
+  sourceRows: ChartRow[];
+  displayRows: ChartRow[];
+  visibleAverageTestIds: Set<number>;
+  testColorById: Map<number, string>;
+}): TrendlineMeta[] {
+  if (!settings.enabled || displayRows.length === 0) {
+    return [];
+  }
+
+  const fitDates = sourceRows.map((row) => String(row.date));
+  const renderDates = displayRows.map((row) => String(row.date));
+  const trendlines: TrendlineMeta[] = [];
+
+  if (settings.groupBy === 'test') {
+    for (const test of tests) {
+      if (!visibleAverageTestIds.has(test.testId)) {
+        continue;
+      }
+
+      const averageKey = getAverageKey(test.testId);
+      const computation = computeTrendline({
+        key: averageKey,
+        testId: test.testId,
+        label: `${test.testName} (тренд)`,
+        color: darkenColor(testColorById.get(test.testId) ?? "#0f766e", 0.38),
+        source: "average",
+        fitDates,
+        fitValues: sourceRows.map((row) => toNullableNumber(row[averageKey])),
+        renderDates,
+        renderValues: displayRows.map((row) => toNullableNumber(row[averageKey])),
+        settings,
+      });
+      computation.values.forEach((value, index) => {
+        displayRows[index][computation.dataKey] = value;
+      });
+      trendlines.push(makeTrendlineMeta(computation));
+    }
+  } else {
+    for (let i = 0; i < objects.length; i++) {
+      const object = objects[i];
+      const objAvgKey = getObjectAverageKey(object.objectKey);
+      const computation = computeTrendline({
+        key: objAvgKey,
+        testId: tests[i % tests.length]?.testId ?? 0,
+        label: `${object.objectLabel} (тренд)`,
+        color: darkenColor(
+          TANK_COLORS[i % TANK_COLORS.length],
+          0.38,
+        ),
+        source: "average",
+        fitDates,
+        fitValues: sourceRows.map((row) => toNullableNumber(row[objAvgKey])),
+        renderDates,
+        renderValues: displayRows.map((row) => toNullableNumber(row[objAvgKey])),
+        settings,
+      });
+      computation.values.forEach((value, index) => {
+        displayRows[index][computation.dataKey] = value;
+      });
+      trendlines.push(makeTrendlineMeta(computation));
+    }
+  }
+
+  return trendlines;
+}
+
+function makeTrendlineMeta(computation: ReturnType<typeof computeTrendline>): TrendlineMeta {
+  return {
+    key: computation.key,
+    dataKey: computation.dataKey,
+    testId: computation.testId,
+    label: computation.label,
+    color: computation.color,
+    report: {
+      key: computation.key,
+      testId: computation.testId,
+      label: computation.label,
+      color: computation.color,
+      mode: computation.mode,
+      source: computation.source,
+      equation: computation.equation,
+      rSquared: computation.rSquared,
+      pointsUsed: computation.pointsUsed,
+      warning: computation.warning,
+    },
+  };
+}
+
 function calculateAverageForSelectedObjects(
   values: ChartValuePoint[],
   testId: number,
@@ -1170,6 +1422,33 @@ function calculateAverageForSelectedObjects(
       (item) =>
         item.testId === testId &&
         selectedKeys.has(item.objectKey) &&
+        typeof item.value === "number",
+    )
+    .map((item) => item.value as number);
+
+  if (numericValues.length === 0) {
+    return null;
+  }
+  return (
+    numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+  );
+}
+
+function calculateAverageForSelectedTests(
+  values: ChartValuePoint[],
+  objectKey: string,
+  selectedTests: ChartTest[],
+): number | null {
+  if (selectedTests.length === 0) {
+    return null;
+  }
+
+  const selectedIds = new Set(selectedTests.map((test) => test.testId));
+  const numericValues = values
+    .filter(
+      (item) =>
+        item.objectKey === objectKey &&
+        selectedIds.has(item.testId) &&
         typeof item.value === "number",
     )
     .map((item) => item.value as number);
@@ -1267,6 +1546,7 @@ function buildGuideValueSpecs({
   testColorById,
   fallbackAxisId,
   showAverage,
+  trendColorById,
 }: {
   guide: HoverGuideState;
   guideMode: ChartGuideMode;
@@ -1276,6 +1556,7 @@ function buildGuideValueSpecs({
   testColorById: Map<number, string>;
   fallbackAxisId: string;
   showAverage: boolean;
+  trendColorById: Map<number, string>;
 }): GuideValueSpec[] {
   const seriesSpecs = series.flatMap((item) => {
     const value = guide.seriesByKey[item.key];
@@ -1295,6 +1576,27 @@ function buildGuideValueSpecs({
 
   if (guideMode === "series" && seriesSpecs.length > 0) {
     return seriesSpecs;
+  }
+
+  const trendSpecs = tests.flatMap((test) => {
+    const value = guide.trendByTest[test.testId];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return [];
+    }
+
+    return [
+      {
+        key: `trend-${test.testId}`,
+        axisId: axisByTest.get(test.testId) ?? fallbackAxisId,
+        value,
+        color: darkenColor(trendColorById.get(test.testId) ?? "#0f766e", 0.15),
+        dashArray: "6 4",
+      } satisfies GuideValueSpec,
+    ];
+  });
+
+  if (trendSpecs.length > 0) {
+    return trendSpecs;
   }
 
   if (!showAverage) {

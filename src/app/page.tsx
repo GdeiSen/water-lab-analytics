@@ -101,13 +101,14 @@ export default function Page() {
     setSelectedObjectKeys,
     setDateRange,
     setSearchQuery,
-    setShowAverage,
     setParseProgress,
     setStatusMessage,
     setArchiveSummary,
     setFiles,
     setTestTypes,
     setChartOptimization,
+    setChartTrendline,
+    chartTrendline,
   } = useDataStore();
 
   const { selectArchive, openArchiveByPath, loadFileDetails, rescan } =
@@ -903,6 +904,7 @@ export default function Page() {
             showAverage={showAverage}
             guideMode={guideMode}
             chartOptimization={chartOptimization}
+            chartTrendline={chartTrendline}
             parseProgress={parseProgress}
             statusMessage={statusMessage}
             onExportExcel={handleExportExcel}
@@ -938,13 +940,13 @@ export default function Page() {
               availableObjects={availableObjects}
               selectedObjectKeys={effectiveSelectedObjectKeys}
               onChangeObjects={setSelectedObjectKeys}
-              showAverage={showAverage}
               guideMode={guideMode}
-              onToggleAverage={setShowAverage}
               onGuideModeChange={setGuideMode}
               optimization={chartOptimization}
+              trendline={chartTrendline}
               pointCount={chartData?.points.length ?? 0}
               onOptimizationChange={setChartOptimization}
+              onTrendlineChange={setChartTrendline}
             />
           </div>
         </div>

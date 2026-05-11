@@ -11,6 +11,8 @@ import type {
   ChartGuideMode,
   ChartHoverSnapshot,
   ChartOptimizationSettings,
+  ChartTrendlineReport,
+  ChartTrendlineSettings,
   DateRange,
   ParameterLink,
   ParseProgress
@@ -27,6 +29,7 @@ interface MainAreaProps {
   showAverage: boolean;
   guideMode: ChartGuideMode;
   chartOptimization: ChartOptimizationSettings;
+  chartTrendline: ChartTrendlineSettings;
   parseProgress: ParseProgress | null;
   statusMessage: string | null;
   onExportExcel: () => void;
@@ -45,6 +48,7 @@ export function MainArea({
   showAverage,
   guideMode,
   chartOptimization,
+  chartTrendline,
   parseProgress,
   statusMessage,
   onExportExcel,
@@ -57,6 +61,7 @@ export function MainArea({
   const [chartHeight, setChartHeight] = useState(360);
   const [uiScale, setUiScale] = useState(1);
   const [hoverSnapshot, setHoverSnapshot] = useState<ChartHoverSnapshot | null>(null);
+  const [trendlineReports, setTrendlineReports] = useState<ChartTrendlineReport[]>([]);
   const [resizeStart, setResizeStart] = useState<{ y: number; height: number; min: number; max: number } | null>(
     null
   );
@@ -80,6 +85,7 @@ export function MainArea({
   useEffect(() => {
     if (!chartData) {
       setHoverSnapshot(null);
+      setTrendlineReports([]);
     }
   }, [chartData]);
 
@@ -152,9 +158,11 @@ export function MainArea({
             showAverage={showAverage}
             guideMode={guideMode}
             optimization={chartOptimization}
+            trendline={chartTrendline}
             height={Math.round(chartHeight * uiScale)}
             uiScale={uiScale}
             onHoverChange={setHoverSnapshot}
+            onTrendlinesChange={setTrendlineReports}
             onExportPng={onExportPng}
             onPrintChart={onPrintChart}
           />
@@ -178,6 +186,8 @@ export function MainArea({
           selectedObjectKeys={selectedObjectKeys}
           parameterLinks={parameterLinks}
           guideMode={guideMode}
+          trendlineReports={trendlineReports}
+          trendlineSettings={chartTrendline}
           onExportExcel={onExportExcel}
         />
       </div>

@@ -6,6 +6,7 @@ import type {
   ArchiveSummary,
   ChartDataset,
   ChartOptimizationSettings,
+  ChartTrendlineSettings,
   DateRange,
   FileDetails,
   FileInfo,
@@ -29,6 +30,7 @@ interface DataStore {
   showAverage: boolean;
   statusMessage: string | null;
   chartOptimization: ChartOptimizationSettings;
+  chartTrendline: ChartTrendlineSettings;
   setArchiveSummary: (summary: ArchiveSummary | null) => void;
   setFiles: (files: FileInfo[]) => void;
   setSelectedFileId: (fileId: number | null) => void;
@@ -44,6 +46,7 @@ interface DataStore {
   setShowAverage: (show: boolean) => void;
   setStatusMessage: (message: string | null) => void;
   setChartOptimization: (settings: Partial<ChartOptimizationSettings>) => void;
+  setChartTrendline: (settings: Partial<ChartTrendlineSettings>) => void;
   resetData: () => void;
 }
 
@@ -63,6 +66,18 @@ const initialOptimization: ChartOptimizationSettings = {
   averageEmaAlpha: 0.25
 };
 
+const initialTrendline: ChartTrendlineSettings = {
+  enabled: false,
+  mode: 'linear',
+  groupBy: 'test',
+  polynomialDegree: 2,
+  linearFilterWindow: 5,
+  maWindow: 5,
+  emaAlpha: 0.25,
+  showEquation: true,
+  showRSquared: true
+};
+
 export const useDataStore = create<DataStore>((set) => ({
   archiveSummary: null,
   files: [],
@@ -79,6 +94,7 @@ export const useDataStore = create<DataStore>((set) => ({
   showAverage: true,
   statusMessage: null,
   chartOptimization: initialOptimization,
+  chartTrendline: initialTrendline,
   setArchiveSummary: (archiveSummary) => set({ archiveSummary }),
   setFiles: (files) => set({ files }),
   setSelectedFileId: (selectedFileId) => set({ selectedFileId }),
@@ -100,6 +116,13 @@ export const useDataStore = create<DataStore>((set) => ({
         ...next
       }
     })),
+  setChartTrendline: (next) =>
+    set((state) => ({
+      chartTrendline: {
+        ...state.chartTrendline,
+        ...next
+      }
+    })),
   resetData: () =>
     set({
       archiveSummary: null,
@@ -116,6 +139,7 @@ export const useDataStore = create<DataStore>((set) => ({
       searchQuery: '',
       showAverage: true,
       statusMessage: null,
-      chartOptimization: initialOptimization
+      chartOptimization: initialOptimization,
+      chartTrendline: initialTrendline
     })
 }));

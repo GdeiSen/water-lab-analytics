@@ -8,6 +8,8 @@ import type {
   ChartGuideMode,
   ChartHoverSnapshot,
   ChartTestStats,
+  ChartTrendlineReport,
+  ChartTrendlineSettings,
   ParameterLink
 } from '@/lib/types';
 import { formatDate, formatNumber } from '@/lib/utils';
@@ -20,6 +22,8 @@ interface StatsSummaryProps {
   selectedObjectKeys: string[];
   parameterLinks: ParameterLink[];
   guideMode: ChartGuideMode;
+  trendlineReports: ChartTrendlineReport[];
+  trendlineSettings: ChartTrendlineSettings;
   onExportExcel: () => void;
 }
 
@@ -48,6 +52,8 @@ export function StatsSummary({
   selectedObjectKeys,
   parameterLinks,
   guideMode,
+  trendlineReports,
+  trendlineSettings,
   onExportExcel
 }: StatsSummaryProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +208,17 @@ export function StatsSummary({
 
   const activeDate = hoverSnapshot?.date ?? null;
   const isExpanded = isFullscreen || isPseudoFullscreen;
+
+  const trendReportByTestId = useMemo(() => {
+    const map = new Map<number, ChartTrendlineReport>();
+    for (const report of trendlineReports) {
+      if (report.testId !== null && !map.has(report.testId)) {
+        map.set(report.testId, report);
+      }
+    }
+    return map;
+  }, [trendlineReports]);
+
   const statGroups = useMemo(
     () =>
       buildStatGroups(
@@ -298,7 +315,9 @@ export function StatsSummary({
                       key={entry.testId}
                       entry={entry}
                       color={testColorById.get(entry.testId) ?? TANK_COLORS[0]}
-                      hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId)}
+                      hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId, guideMode)}
+                      trendReport={trendReportByTestId.get(entry.testId) ?? null}
+                      trendlineSettings={trendlineSettings}
                     />
                   ))}
                 </div>
@@ -313,7 +332,9 @@ export function StatsSummary({
               key={entry.testId}
               entry={entry}
               color={color}
-              hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId)}
+              hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId, guideMode)}
+              trendReport={trendReportByTestId.get(entry.testId) ?? null}
+              trendlineSettings={trendlineSettings}
             />
           );
         })}
@@ -455,12 +476,27 @@ export function StatsSummary({
 function StatsCard({
   entry,
   color,
-  hoverValue
+  hoverValue,
+  trendReport,
+  trendlineSettings
 }: {
   entry: ChartTestStats;
   color: string;
   hoverValue: number | null;
+  trendReport: ChartTrendlineReport | null;
+  trendlineSettings: ChartTrendlineSettings;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyEquation = () => {
+    if (trendReport?.equation) {
+      void navigator.clipboard.writeText(trendReport.equation).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    }
+  };
+
   return (
     <div className="border border-ink/15 bg-[#f7f8fa] p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -483,6 +519,23 @@ function StatsCard({
         <Stat title={'\u0421\u0440\u0435\u0434\u043d\u0435\u0435'} value={formatNumber(entry.stats.average)} />
         <Stat title={'\u041c\u0435\u0434\u0438\u0430\u043d\u0430'} value={formatNumber(entry.stats.median)} />
       </div>
+      {trendReport && !trendReport.warning && trendlineSettings.showEquation && trendReport.equation && (
+        <div className="mt-2 border-t border-ink/10 pt-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-ink/40">
+            {formatMode(trendReport.mode)}
+          </span>
+          <p
+            className="cursor-pointer text-xs text-ink/65 transition hover:text-ink"
+            title={copied ? 'Скопировано' : 'Нажмите, чтобы скопировать формулу'}
+            onClick={handleCopyEquation}
+          >
+            {trendReport.equation}
+          </p>
+          {trendlineSettings.showRSquared && trendReport.rSquared !== null && (
+            <p className="text-xs text-ink/50">R²: {formatRSquared(trendReport.rSquared)}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -502,10 +555,17 @@ function Stat({
   );
 }
 
-function getHoverCursorValue(snapshot: ChartHoverSnapshot | null, testId: number): number | null {
+function getHoverCursorValue(
+  snapshot: ChartHoverSnapshot | null,
+  testId: number,
+  guideMode: ChartGuideMode
+): number | null {
   const item = snapshot?.statsByTest.find((entry) => entry.testId === testId);
   if (!item) {
     return null;
+  }
+  if (guideMode === 'average' && item.trendCursorValue !== null) {
+    return item.trendCursorValue;
   }
   return item.cursorValue;
 }
@@ -606,8 +666,8 @@ function calculateCursorEfficiency(
 
   if (guideMode === 'average') {
     return calculateEfficiency(
-      getHoverCursorValue(hoverSnapshot, link.inputTestId),
-      getHoverCursorValue(hoverSnapshot, link.outputTestId)
+      getHoverCursorValue(hoverSnapshot, link.inputTestId, guideMode),
+      getHoverCursorValue(hoverSnapshot, link.outputTestId, guideMode)
     );
   }
 
@@ -685,4 +745,32 @@ function formatPercent(value: number | null): string {
     return '—';
   }
   return `${formatNumber(value, 1)}%`;
+}
+
+function formatRSquared(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+  return Number(value.toFixed(4)).toString();
+}
+
+function formatMode(mode: ChartTrendlineReport['mode']): string {
+  switch (mode) {
+    case 'linear':
+      return 'Линейная';
+    case 'power':
+      return 'Степенная';
+    case 'exponential':
+      return 'Экспоненциальная';
+    case 'polynomial':
+      return 'Полиномиальная';
+    case 'logarithmic':
+      return 'Логарифмическая';
+    case 'linear_filter':
+      return 'Линейная фильтрация';
+    case 'moving_average':
+      return 'Скользящая средняя';
+    case 'ema':
+      return 'EMA';
+  }
 }

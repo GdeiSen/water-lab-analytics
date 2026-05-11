@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Info } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
 import type {
   ChartGuideMode,
   ChartOptimizationSettings,
+  ChartTrendlineSettings,
   ParameterLink,
   TechnologicalObject,
   TestType,
 } from "@/lib/types";
-import { AnalysisModeControl, ChartControls } from "@/components/charts/ChartControls";
+import { AnalysisModeControl } from "@/components/charts/ChartControls";
 import { ObjectSelector } from "@/components/filters/ObjectSelector";
 import { TestTypeSelect } from "@/components/filters/TestTypeSelect";
 
@@ -25,13 +26,13 @@ interface RightSidebarProps {
   availableObjects: TechnologicalObject[];
   selectedObjectKeys: string[];
   onChangeObjects: (keys: string[]) => void;
-  showAverage: boolean;
   guideMode: ChartGuideMode;
-  onToggleAverage: (show: boolean) => void;
   onGuideModeChange: (mode: ChartGuideMode) => void;
   optimization: ChartOptimizationSettings;
+  trendline: ChartTrendlineSettings;
   pointCount: number;
   onOptimizationChange: (next: Partial<ChartOptimizationSettings>) => void;
+  onTrendlineChange: (next: Partial<ChartTrendlineSettings>) => void;
 }
 
 export function RightSidebar({
@@ -44,28 +45,23 @@ export function RightSidebar({
   availableObjects,
   selectedObjectKeys,
   onChangeObjects,
-  showAverage,
   guideMode,
-  onToggleAverage,
   onGuideModeChange,
   optimization,
+  trendline,
   pointCount,
   onOptimizationChange,
+  onTrendlineChange,
 }: RightSidebarProps) {
   const [openSections, setOpenSections] = useState({
     test: true,
     tanks: true,
     analysis: true,
-    average: true,
+    trendline: true,
     optimization: true,
   });
-  const [averageEmaDraft, setAverageEmaDraft] = useState(
-    String(optimization.averageEmaAlpha),
-  );
   const [lineEmaDraft, setLineEmaDraft] = useState(String(optimization.emaAlpha));
-  const [isEditingAverageEma, setIsEditingAverageEma] = useState(false);
   const [isEditingLineEma, setIsEditingLineEma] = useState(false);
-  const [showAverageInfo, setShowAverageInfo] = useState(false);
 
   const effectiveOptimization = useMemo(
     () => resolveEffectiveOptimization(optimization, pointCount),
@@ -75,12 +71,6 @@ export function RightSidebar({
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
-
-  useEffect(() => {
-    if (!isEditingAverageEma) {
-      setAverageEmaDraft(String(optimization.averageEmaAlpha));
-    }
-  }, [isEditingAverageEma, optimization.averageEmaAlpha]);
 
   useEffect(() => {
     if (!isEditingLineEma) {
@@ -160,10 +150,10 @@ export function RightSidebar({
             <div className="space-y-2">
               <p className="text-[11px] text-ink/50">
                 Выберите, как считать вспомогательные значения и эффективность: по точкам графиков
-                или по средним линиям.
+                или по линиям тренда.
               </p>
               <AnalysisModeControl
-                showAverage={showAverage}
+                trendEnabled={trendline.enabled}
                 guideMode={guideMode}
                 onGuideModeChange={onGuideModeChange}
               />
@@ -206,78 +196,81 @@ export function RightSidebar({
         <section className="min-w-0 space-y-2 border border-ink/15 p-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink/70">
-              Средняя линия
+              Линия тренда
             </p>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="text-ink/60 transition hover:text-ink"
-                onClick={() => setShowAverageInfo((prev) => !prev)}
-                title={showAverageInfo ? "Скрыть пояснение" : "Показать пояснение"}
-              >
-                <Info className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                className="text-ink/60 transition hover:text-ink"
-                onClick={() => toggleSection("average")}
-                title={openSections.average ? "Свернуть" : "Развернуть"}
-              >
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${openSections.average ? "rotate-180" : "rotate-0"}`}
-                />
-              </button>
-            </div>
-          </div>
-          {showAverageInfo && (
-            <p className="rounded border border-ink/20 bg-[#f7f8fa] px-2 py-1.5 text-[11px] text-ink/70">
-              Средняя линия строится по выбранным технологическим объектам. Если
-              она полностью совпадает с графиком параметра, лишняя линия
-              скрывается. Вспомогательные линии можно переключать между
-              графиками и средними значениями.
-            </p>
-          )}
-          {openSections.average && (
-            <>
-              <p className="text-[11px] text-ink/50">
-                Настройка вычисления и сглаживания средней линии.
-              </p>
-              <ChartControls
-                showAverage={showAverage}
-                guideMode={guideMode}
-                onToggleAverage={onToggleAverage}
-                onGuideModeChange={onGuideModeChange}
+            <button
+              type="button"
+              className="text-ink/60 transition hover:text-ink"
+              onClick={() => toggleSection("trendline")}
+              title={openSections.trendline ? "Свернуть" : "Развернуть"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${openSections.trendline ? "rotate-180" : "rotate-0"}`}
               />
+            </button>
+          </div>
+          {openSections.trendline && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={trendline.enabled}
+                  onChange={(event) => onTrendlineChange({ enabled: event.target.checked })}
+                  className="accent-ink"
+                />
+                Показать линию тренда
+              </label>
 
               <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
-                Функция средней линии
+                Показывать по
                 <select
                   className="h-8 w-full min-w-0 border border-ink/30 px-2 text-sm"
-                  value={optimization.averageApproximation}
+                  value={trendline.groupBy}
                   onChange={(event) =>
-                    onOptimizationChange({
-                      averageApproximation: event.target
-                        .value as ChartOptimizationSettings["averageApproximation"],
+                    onTrendlineChange({
+                      groupBy: event.target.value as ChartTrendlineSettings["groupBy"],
                     })
                   }
                 >
-                  <option value="moving_average">Скользящая средняя</option>
-                  <option value="ema">EMA</option>
+                  <option value="test">Испытаниям</option>
+                  <option value="object">Объектам</option>
                 </select>
               </label>
 
-              {optimization.averageApproximation === "moving_average" && (
+              <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
+                Тип функции
+                <select
+                  className="h-8 w-full min-w-0 border border-ink/30 px-2 text-sm"
+                  value={trendline.mode}
+                  onChange={(event) =>
+                    onTrendlineChange({
+                      mode: event.target.value as ChartTrendlineSettings["mode"],
+                    })
+                  }
+                >
+                  <option value="linear">Линейная</option>
+                  <option value="power">Степенная</option>
+                  <option value="exponential">Экспоненциальная</option>
+                  <option value="polynomial">Полиномиальная</option>
+                  <option value="logarithmic">Логарифмическая</option>
+                  <option value="moving_average">Скользящая средняя</option>
+                  <option value="ema">EMA</option>
+                  <option value="linear_filter">Линейная фильтрация</option>
+                </select>
+              </label>
+
+              {trendline.mode === "polynomial" && (
                 <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
-                  Окно для средней линии
+                  Степень полинома
                   <input
                     type="number"
                     min={2}
-                    max={50}
-                    value={optimization.averageMovingAverageWindow}
+                    max={4}
+                    value={trendline.polynomialDegree}
                     onChange={(event) =>
-                      onOptimizationChange({
-                        averageMovingAverageWindow: Math.min(
-                          50,
+                      onTrendlineChange({
+                        polynomialDegree: Math.min(
+                          4,
                           Math.max(2, Number(event.target.value) || 2),
                         ),
                       })
@@ -287,28 +280,82 @@ export function RightSidebar({
                 </label>
               )}
 
-              {optimization.averageApproximation === "ema" && (
+              {(trendline.mode === "linear_filter" || trendline.mode === "moving_average") && (
                 <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
-                  EMA alpha средней (0..1)
+                  Окно
+                  <input
+                    type="number"
+                    min={trendline.mode === "linear_filter" ? 3 : 2}
+                    max={trendline.mode === "linear_filter" ? 31 : 50}
+                    step={trendline.mode === "linear_filter" ? 2 : 1}
+                    value={
+                      trendline.mode === "linear_filter"
+                        ? trendline.linearFilterWindow
+                        : trendline.maWindow
+                    }
+                    onChange={(event) =>
+                      trendline.mode === "linear_filter"
+                        ? onTrendlineChange({
+                            linearFilterWindow: Math.min(
+                              31,
+                              Math.max(3, Number(event.target.value) || 3),
+                            ),
+                          })
+                        : onTrendlineChange({
+                            maWindow: Math.min(
+                              50,
+                              Math.max(2, Number(event.target.value) || 2),
+                            ),
+                          })
+                    }
+                    className="h-8 w-full min-w-0 border border-ink/30 px-2 text-sm"
+                  />
+                </label>
+              )}
+
+              {trendline.mode === "ema" && (
+                <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">
+                  EMA alpha (0..1)
                   <input
                     type="text"
                     inputMode="decimal"
-                    value={averageEmaDraft}
-                    onFocus={() => setIsEditingAverageEma(true)}
-                    onChange={(event) => setAverageEmaDraft(event.target.value)}
-                    onBlur={() => {
-                      setIsEditingAverageEma(false);
-                      const parsed = parseEmaValue(
-                        averageEmaDraft,
-                        optimization.averageEmaAlpha,
-                      );
-                      onOptimizationChange({ averageEmaAlpha: parsed });
-                      setAverageEmaDraft(String(parsed));
+                    value={String(trendline.emaAlpha)}
+                    onChange={(event) => {
+                      const parsed = parseFloat(event.target.value);
+                      if (!Number.isNaN(parsed)) {
+                        onTrendlineChange({
+                          emaAlpha: Math.min(0.95, Math.max(0.05, parsed)),
+                        });
+                      }
                     }}
                     className="h-8 w-full min-w-0 border border-ink/30 px-2 text-sm"
                   />
                 </label>
               )}
+
+              <label className="flex items-center gap-2 border border-ink/20 px-2 py-1.5 text-xs text-ink/75">
+                <input
+                  type="checkbox"
+                  checked={trendline.showEquation}
+                  onChange={(event) =>
+                    onTrendlineChange({ showEquation: event.target.checked })
+                  }
+                  className="accent-ink"
+                />
+                Показывать формулу
+              </label>
+
+              <label className="flex items-center gap-2 border border-ink/20 px-2 py-1.5 text-xs text-ink/75">
+                <input
+                  type="checkbox"
+                  checked={trendline.showRSquared}
+                  onChange={(event) =>
+                    onTrendlineChange({ showRSquared: event.target.checked })
+                  }
+                  className="accent-ink"
+                />
+                Показывать R²
+              </label>
             </>
           )}
         </section>

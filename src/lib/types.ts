@@ -145,6 +145,7 @@ export interface ChartHoverTestStats {
   median: number | null;
   stdDev: number | null;
   cursorValue: number | null;
+  trendCursorValue: number | null;
 }
 
 export interface ChartHoverSnapshot {
@@ -175,6 +176,20 @@ export interface ExcelExportPayload {
 
 export type ApproximationMode = 'raw' | 'moving_average' | 'ema';
 
+export type TrendlineMode =
+  | 'linear'
+  | 'power'
+  | 'exponential'
+  | 'polynomial'
+  | 'logarithmic'
+  | 'linear_filter'
+  | 'moving_average'
+  | 'ema';
+
+export type TrendlineSource = 'series' | 'average';
+
+export type TrendlineGroupBy = 'test' | 'object';
+
 export interface ChartOptimizationSettings {
   autoOptimize: boolean;
   pointCompression: number;
@@ -184,6 +199,31 @@ export interface ChartOptimizationSettings {
   emaAlpha: number;
   averageMovingAverageWindow: number;
   averageEmaAlpha: number;
+}
+
+export interface ChartTrendlineSettings {
+  enabled: boolean;
+  mode: TrendlineMode;
+  groupBy: TrendlineGroupBy;
+  polynomialDegree: number;
+  linearFilterWindow: number;
+  maWindow: number;
+  emaAlpha: number;
+  showEquation: boolean;
+  showRSquared: boolean;
+}
+
+export interface ChartTrendlineReport {
+  key: string;
+  testId: number;
+  label: string;
+  color: string;
+  mode: TrendlineMode;
+  source: TrendlineSource;
+  equation: string | null;
+  rSquared: number | null;
+  pointsUsed: number;
+  warning: string | null;
 }
 
 export interface DateRange {

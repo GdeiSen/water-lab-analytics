@@ -29,10 +29,14 @@ export function ChartControls({
 }
 
 export function AnalysisModeControl({
-  showAverage,
+  trendEnabled,
   guideMode,
   onGuideModeChange
-}: Pick<ChartControlsProps, 'showAverage' | 'guideMode' | 'onGuideModeChange'>) {
+}: {
+  trendEnabled: boolean;
+  guideMode: ChartGuideMode;
+  onGuideModeChange: (next: ChartGuideMode) => void;
+}) {
   return (
     <div className="grid grid-cols-2 gap-1">
       <button
@@ -49,15 +53,15 @@ export function AnalysisModeControl({
       <button
         type="button"
         onClick={() => onGuideModeChange('average')}
-        disabled={!showAverage}
-        title={showAverage ? 'Анализировать по средним значениям' : 'Сначала включите среднюю линию'}
+        disabled={!trendEnabled}
+        title={trendEnabled ? 'Анализировать по линии тренда' : 'Сначала включите линию тренда'}
         className={`h-8 border px-2 text-xs font-medium transition ${
           guideMode === 'average'
             ? 'border-ink bg-ink text-white'
             : 'border-ink/25 bg-white text-ink/75 hover:border-ink/45 hover:text-ink'
         } disabled:cursor-not-allowed disabled:border-ink/15 disabled:bg-white disabled:text-ink/35`}
       >
-        Средние
+        Тренды
       </button>
     </div>
   );
