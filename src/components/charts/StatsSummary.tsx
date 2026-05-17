@@ -45,6 +45,19 @@ interface SortState {
   direction: SortDirection;
 }
 
+interface PearsonCorrelationEntry {
+  key: string;
+  label: string;
+  coefficient: number | null;
+  pairsUsed: number;
+  warning: string | null;
+}
+
+interface PearsonCorrelationTest {
+  testId: number;
+  testName: string;
+}
+
 export function StatsSummary({
   data,
   hoverSnapshot,
@@ -287,39 +300,50 @@ export function StatsSummary({
       <div className="grid gap-2 md:grid-cols-2">
         {statGroups.map((group) => {
           if (group.kind === 'linked') {
+            const groupPearson = buildPearsonCorrelationEntries(data, group.entries, visibleObjects);
             return (
               <div key={`linked-${group.link.id}`} className="md:col-span-2">
-                <div className="border border-ink/15 bg-[#f7f8fa] px-3 py-2 text-ink">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide">
-                      Эффективность: {group.link.label}
-                    </p>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="border bg-white px-2 py-0.5 font-semibold text-surge"
-                        style={{ borderColor: '#0b7a75', color: '#0b7a75' }}
-                      >
-                        Средняя: {formatPercent(group.averageEfficiency)}
-                      </span>
-                      <span
-                        className="border bg-white px-2 py-0.5 font-semibold text-surge"
-                        style={{ borderColor: '#0b7a75', color: '#0b7a75' }}
-                      >
-                        {formatPercent(group.cursorEfficiency)}
-                      </span>
-                    </div>
+                <div className="border border-ink/20 bg-white p-2">
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {group.entries.map((entry) => (
+                      <StatsCard
+                        key={entry.testId}
+                        entry={entry}
+                        color={testColorById.get(entry.testId) ?? TANK_COLORS[0]}
+                        hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId, guideMode)}
+                        trendReport={trendReportByTestId.get(entry.testId) ?? null}
+                        trendlineSettings={trendlineSettings}
+                      />
+                    ))}
                   </div>
+                  <GroupedMetricRows
+                    pearsonEntries={groupPearson}
+                    efficiencyAverage={group.averageEfficiency}
+                    efficiencyCursor={group.cursorEfficiency}
+                  />
                 </div>
-                <div className="grid gap-2 border-x border-b border-ink/20 bg-white p-2 md:grid-cols-2">
-                  {group.entries.map((entry) => (
-                    <StatsCard
-                      key={entry.testId}
-                      entry={entry}
-                      color={testColorById.get(entry.testId) ?? TANK_COLORS[0]}
-                      hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId, guideMode)}
-                      trendReport={trendReportByTestId.get(entry.testId) ?? null}
-                      trendlineSettings={trendlineSettings}
-                    />
-                  ))}
+              </div>
+            );
+          }
+
+          if (group.kind === 'paired') {
+            const groupPearson = buildPearsonCorrelationEntries(data, group.entries, visibleObjects);
+            return (
+              <div key={`paired-${group.entries.map((entry) => entry.testId).join('-')}`} className="md:col-span-2">
+                <div className="border border-ink/20 bg-white p-2">
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {group.entries.map((entry) => (
+                      <StatsCard
+                        key={entry.testId}
+                        entry={entry}
+                        color={testColorById.get(entry.testId) ?? TANK_COLORS[0]}
+                        hoverValue={getHoverCursorValue(hoverSnapshot, entry.testId, guideMode)}
+                        trendReport={trendReportByTestId.get(entry.testId) ?? null}
+                        trendlineSettings={trendlineSettings}
+                      />
+                    ))}
+                  </div>
+                  <GroupedMetricRows pearsonEntries={groupPearson} />
                 </div>
               </div>
             );
@@ -555,6 +579,53 @@ function Stat({
   );
 }
 
+function GroupedMetricRows({
+  pearsonEntries,
+  efficiencyAverage,
+  efficiencyCursor
+}: {
+  pearsonEntries: PearsonCorrelationEntry[] | null;
+  efficiencyAverage?: number | null;
+  efficiencyCursor?: number | null;
+}) {
+  const hasEfficiency = efficiencyAverage !== undefined || efficiencyCursor !== undefined;
+  const hasRows = (pearsonEntries && pearsonEntries.length > 0) || hasEfficiency;
+
+  if (!hasRows) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 divide-y divide-ink/10 border-t border-ink/15 text-xs">
+      {pearsonEntries?.map((entry) => (
+        <div key={`pearson-${entry.key}`} className="grid gap-2 py-1.5 md:grid-cols-[160px_1fr_120px]">
+          <span className="font-semibold uppercase tracking-wide text-ink/55">Пирсон</span>
+          <span className="min-w-0 truncate text-ink/70">
+            {entry.label}
+            <span className="ml-2 text-ink/40">точек: {entry.pairsUsed}</span>
+            <span className="ml-2 text-ink/45">{entry.warning ?? describeCorrelation(entry.coefficient)}</span>
+          </span>
+          <span className="font-mono font-semibold text-right" style={{ color: getCorrelationColor(entry.coefficient) }}>
+            r = {formatCorrelation(entry.coefficient)}
+          </span>
+        </div>
+      ))}
+      {hasEfficiency && (
+        <div className="grid gap-2 py-1.5 md:grid-cols-[160px_1fr_120px]">
+          <span className="font-semibold uppercase tracking-wide text-ink/55">Эффективность</span>
+          <span className="min-w-0 truncate text-ink/70">
+            Средняя: <span className="font-semibold">{formatPercent(efficiencyAverage ?? null)}</span>
+            <span className="font-semibold">, {formatPercent(efficiencyCursor ?? null)}</span>
+          </span>
+          <span className="font-mono font-semibold text-right" style={{ color: '#0b7a75' }}>
+            {formatPercent(efficiencyAverage ?? null)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getHoverCursorValue(
   snapshot: ChartHoverSnapshot | null,
   testId: number,
@@ -579,9 +650,109 @@ type StatGroup =
       cursorEfficiency: number | null;
     }
   | {
+      kind: 'paired';
+      entries: ChartTestStats[];
+    }
+  | {
       kind: 'single';
       entry: ChartTestStats;
     };
+
+function buildPearsonCorrelationEntries(
+  data: ChartDataset | null,
+  tests: PearsonCorrelationTest[],
+  visibleObjects: ChartDataset['objects']
+): PearsonCorrelationEntry[] | null {
+  if (!data || tests.length !== 2) {
+    return null;
+  }
+
+  const [leftTest, rightTest] = tests;
+  const entries: PearsonCorrelationEntry[] = [];
+  const visibleObjectKeys = new Set(visibleObjects.map((object) => object.objectKey));
+  const averagePairs = data.points
+    .map((point) => {
+      const left = averageValues(point.values, leftTest.testId, visibleObjectKeys);
+      const right = averageValues(point.values, rightTest.testId, visibleObjectKeys);
+      return [left, right] as const;
+    })
+    .filter(isNumericPair);
+
+  entries.push({
+    key: 'average',
+    label: 'Среднее по выбранным объектам',
+    ...calculatePearsonCorrelation(averagePairs)
+  });
+
+  for (const object of visibleObjects) {
+    const objectPairs = data.points
+      .map((point) => {
+        const left = findPointValue(point.values, leftTest.testId, object.objectKey);
+        const right = findPointValue(point.values, rightTest.testId, object.objectKey);
+        return [left, right] as const;
+      })
+      .filter(isNumericPair);
+
+    entries.push({
+      key: object.objectKey,
+      label: object.objectLabel,
+      ...calculatePearsonCorrelation(objectPairs)
+    });
+  }
+
+  return entries;
+}
+
+function calculatePearsonCorrelation(pairs: Array<readonly [number, number]>): {
+  coefficient: number | null;
+  pairsUsed: number;
+  warning: string | null;
+} {
+  if (pairs.length < 2) {
+    return {
+      coefficient: null,
+      pairsUsed: pairs.length,
+      warning: 'Нужно минимум 2 парные точки'
+    };
+  }
+
+  const averageLeft = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const averageRight = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  let covariance = 0;
+  let leftVariance = 0;
+  let rightVariance = 0;
+
+  for (const [left, right] of pairs) {
+    const leftDelta = left - averageLeft;
+    const rightDelta = right - averageRight;
+    covariance += leftDelta * rightDelta;
+    leftVariance += leftDelta ** 2;
+    rightVariance += rightDelta ** 2;
+  }
+
+  if (leftVariance === 0 || rightVariance === 0) {
+    return {
+      coefficient: null,
+      pairsUsed: pairs.length,
+      warning: 'Один из параметров не меняется'
+    };
+  }
+
+  return {
+    coefficient: covariance / Math.sqrt(leftVariance * rightVariance),
+    pairsUsed: pairs.length,
+    warning: null
+  };
+}
+
+function isNumericPair(pair: readonly [number | null, number | null]): pair is readonly [number, number] {
+  return (
+    typeof pair[0] === 'number' &&
+    Number.isFinite(pair[0]) &&
+    typeof pair[1] === 'number' &&
+    Number.isFinite(pair[1])
+  );
+}
 
 function buildStatGroups(
   entries: ChartTestStats[],
@@ -617,6 +788,15 @@ function buildStatGroups(
     });
     used.add(input.testId);
     used.add(output.testId);
+  }
+
+  if (groups.length === 0 && entries.length === 2) {
+    groups.push({
+      kind: 'paired',
+      entries
+    });
+    used.add(entries[0].testId);
+    used.add(entries[1].testId);
   }
 
   for (const entry of entries) {
@@ -745,6 +925,49 @@ function formatPercent(value: number | null): string {
     return '—';
   }
   return `${formatNumber(value, 1)}%`;
+}
+
+function formatCorrelation(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return '—';
+  }
+  return formatNumber(Math.max(-1, Math.min(1, value)), 4);
+}
+
+function describeCorrelation(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return 'Недостаточно данных';
+  }
+
+  const absolute = Math.abs(value);
+  const direction = value > 0 ? 'прямая' : value < 0 ? 'обратная' : 'нет линейной связи';
+  if (absolute >= 0.9) {
+    return `Очень сильная ${direction}`;
+  }
+  if (absolute >= 0.7) {
+    return `Сильная ${direction}`;
+  }
+  if (absolute >= 0.5) {
+    return `Умеренная ${direction}`;
+  }
+  if (absolute >= 0.3) {
+    return `Слабая ${direction}`;
+  }
+  return 'Линейная связь почти не выражена';
+}
+
+function getCorrelationColor(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return '#6b7280';
+  }
+  const absolute = Math.abs(value);
+  if (absolute >= 0.7) {
+    return '#0b7a75';
+  }
+  if (absolute >= 0.3) {
+    return '#b45309';
+  }
+  return '#6b7280';
 }
 
 function formatRSquared(value: number): string {
