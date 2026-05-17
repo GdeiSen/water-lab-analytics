@@ -16,14 +16,31 @@ jobs:
         include:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
+            edition: licensed
           - platform: macos-latest
             args: --target x86_64-apple-darwin
+            edition: licensed
           - platform: ubuntu-22.04
             args: ""
+            edition: licensed
           - platform: windows-latest
             args: ""
+            edition: licensed
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            edition: community
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            edition: community
+          - platform: ubuntu-22.04
+            args: ""
+            edition: community
+          - platform: windows-latest
+            args: ""
+            edition: community
 
     runs-on: ${{ matrix.platform }}
+    name: Build ${{ matrix.edition }} on ${{ matrix.platform }} ${{ matrix.args }}
 
     steps:
       - name: Checkout
@@ -49,17 +66,30 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Configure community bundle
+        if: matrix.edition == 'community'
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = "src-tauri/tauri.conf.json";
+          const config = JSON.parse(fs.readFileSync(path, "utf8"));
+          config.productName = "Water Lab Analytics Community";
+          config.identifier = "com.waterlab.analytics.community";
+          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WLA_LICENSE_REQUIRED: ${{ contains(github.ref_name, 'community') && '0' || secrets.WLA_LICENSE_REQUIRED }}
+          WLA_LICENSE_REQUIRED: ${{ matrix.edition == 'community' && '0' || '1' }}
           WLA_LICENSE_PUBLIC_KEY: ${{ secrets.WLA_LICENSE_PUBLIC_KEY }}
           WLA_LICENSE_API_URL: ${{ secrets.WLA_LICENSE_API_URL }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Water Lab Analytics ${{ github.ref_name }}
-          releaseBody: Release artifacts for Water Lab Analytics.
+          releaseBody: Licensed and community release artifacts for Water Lab Analytics.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
