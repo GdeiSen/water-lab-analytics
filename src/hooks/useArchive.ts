@@ -25,6 +25,9 @@ export function useArchive() {
     setFileDetails,
     selectedTestIds,
     setSelectedObjectKeys,
+    setChartData,
+    setDateRange,
+    setParseProgress,
     setBusy,
     setStatusMessage
   } = useDataStore();
@@ -36,6 +39,16 @@ export function useArchive() {
       }
 
       setBusy(true);
+      setArchiveSummary(null);
+      setFiles([]);
+      setSelectedFileId(null);
+      setFileDetails(null);
+      setSelectedObjectKeys([]);
+      setTestTypes([]);
+      setSelectedTestIds([]);
+      setChartData(null);
+      setDateRange({ from: null, to: null });
+      setParseProgress(null);
       if (!options.silent) {
         setStatusMessage('Сканирование архива...');
       }
@@ -56,12 +69,9 @@ export function useArchive() {
           setSelectedObjectKeys([]);
         }
 
-        const testTypes = await api.getTestTypes(session.token);
+        const testTypes = await api.getTestTypes(session.token, summary.archiveId);
         setTestTypes(testTypes);
-        const preserved = selectedTestIds.filter((id) =>
-          testTypes.some((item) => item.id === id)
-        );
-        const nextTestIds = preserved.length > 0 ? preserved : testTypes[0] ? [testTypes[0].id] : [];
+        const nextTestIds = testTypes[0] ? [testTypes[0].id] : [];
         setSelectedTestIds(nextTestIds);
 
         setStatusMessage(`Архив обновлён: ${summary.totalFiles} файлов`);
@@ -80,12 +90,14 @@ export function useArchive() {
       }
     },
     [
-      selectedTestIds,
       session,
       setArchiveSummary,
       setBusy,
+      setChartData,
+      setDateRange,
       setFileDetails,
       setFiles,
+      setParseProgress,
       setSelectedFileId,
       setSelectedObjectKeys,
       setSelectedTestIds,
@@ -146,6 +158,12 @@ export function useArchive() {
         setFileDetails(null);
         setSelectedObjectKeys([]);
       }
+      const testTypes = await api.getTestTypes(session.token, summary.archiveId);
+      setTestTypes(testTypes);
+      const availableTestIds = new Set(testTypes.map((item) => item.id));
+      const preserved = selectedTestIds.filter((id) => availableTestIds.has(id));
+      setSelectedTestIds(preserved.length > 0 ? preserved : testTypes[0] ? [testTypes[0].id] : []);
+      setChartData(null);
       toast.success('Архив пересканирован');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось пересканировать архив';
@@ -158,10 +176,14 @@ export function useArchive() {
     session,
     setArchiveSummary,
     setBusy,
+    setChartData,
     setFileDetails,
     setFiles,
     setSelectedFileId,
-    setSelectedObjectKeys
+    setSelectedObjectKeys,
+    setSelectedTestIds,
+    setTestTypes,
+    selectedTestIds
   ]);
 
   return {

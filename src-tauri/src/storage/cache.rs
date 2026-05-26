@@ -104,7 +104,7 @@ pub fn process_archive(
     db.cleanup_unused_test_types()?;
 
     let files_after = db.get_file_list(archive_id)?;
-    let tests = db.get_all_test_types()?;
+    let tests = db.get_test_types_for_archive(archive_id)?;
 
     let mut status_count: HashMap<&'static str, usize> = HashMap::new();
     for file in &files_after {

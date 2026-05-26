@@ -422,6 +422,46 @@ impl Database {
         Ok(items)
     }
 
+    pub fn get_test_types_for_archive(&self, archive_id: i64) -> Result<Vec<TestType>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT DISTINCT
+                tt.id,
+                tt.canonical_name,
+                tt.display_name,
+                tt.unit,
+                tt.aliases
+            FROM test_types tt
+            JOIN measurements m ON m.test_id = tt.id
+            JOIN files f ON f.id = m.file_id
+            WHERE f.archive_id = ?1
+            ORDER BY tt.display_name
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![archive_id], |row| {
+            let aliases_raw: Option<String> = row.get(4)?;
+            let aliases = aliases_raw
+                .as_deref()
+                .and_then(|v| serde_json::from_str::<Vec<String>>(v).ok())
+                .unwrap_or_default();
+            Ok(TestType {
+                id: row.get(0)?,
+                canonical_name: row.get(1)?,
+                display_name: row.get(2)?,
+                unit: row.get(3)?,
+                aliases,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
     pub fn cleanup_unused_test_types(&self) -> Result<(), AppError> {
         let conn = self.connection.lock();
         conn.execute(
@@ -884,18 +924,8 @@ mod tests {
         db.upsert_parsed_files(
             archive_id,
             &[
-                persisted_file(
-                    "03.05.2026.xlsx",
-                    "2026-05-03",
-                    true,
-                    10.0,
-                ),
-                persisted_file(
-                    "04.05.2026.xlsx",
-                    "2026-05-04",
-                    false,
-                    20.0,
-                ),
+                persisted_file("03.05.2026.xlsx", "2026-05-03", true, 10.0),
+                persisted_file("04.05.2026.xlsx", "2026-05-04", false, 20.0),
             ],
         )
         .expect("insert files");
@@ -925,9 +955,72 @@ mod tests {
         assert_eq!(dataset.stats_by_test[0].stats.points_with_values, 1);
     }
 
+    #[test]
+    fn get_test_types_for_archive_does_not_mix_archives() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+        let first_archive_id = db
+            .get_or_create_archive("/tmp/first-archive", 1)
+            .expect("first archive id");
+        let second_archive_id = db
+            .get_or_create_archive("/tmp/second-archive", 1)
+            .expect("second archive id");
+
+        db.upsert_parsed_files(
+            first_archive_id,
+            &[persisted_file_with_test(
+                "01.05.2026.xlsx",
+                "2026-05-01",
+                "Азот аммонийный на входе Аэротенка",
+                true,
+                10.0,
+            )],
+        )
+        .expect("insert first archive");
+        db.upsert_parsed_files(
+            second_archive_id,
+            &[persisted_file_with_test(
+                "02.05.2026.xlsx",
+                "2026-05-02",
+                "Азот аммонийный на входе Секции",
+                true,
+                20.0,
+            )],
+        )
+        .expect("insert second archive");
+
+        let first_tests = db
+            .get_test_types_for_archive(first_archive_id)
+            .expect("first tests");
+        let second_tests = db
+            .get_test_types_for_archive(second_archive_id)
+            .expect("second tests");
+
+        assert_eq!(first_tests.len(), 1);
+        assert_eq!(
+            first_tests[0].display_name,
+            "Азот аммонийный на входе Аэротенка"
+        );
+        assert_eq!(second_tests.len(), 1);
+        assert_eq!(
+            second_tests[0].display_name,
+            "Азот аммонийный на входе Секции"
+        );
+    }
+
     fn persisted_file(
         filename: &str,
         date: &str,
+        object_active: bool,
+        value: f64,
+    ) -> PersistedFile {
+        persisted_file_with_test(filename, date, "Азот", object_active, value)
+    }
+
+    fn persisted_file_with_test(
+        filename: &str,
+        date: &str,
+        test_name: &str,
         object_active: bool,
         value: f64,
     ) -> PersistedFile {
@@ -940,8 +1033,8 @@ mod tests {
                 object_count: 1,
                 objects: Vec::new(),
                 measurements: vec![Measurement {
-                    test_name: "Азот".to_string(),
-                    test_name_raw: "Азот".to_string(),
+                    test_name: test_name.to_string(),
+                    test_name_raw: test_name.to_string(),
                     values: vec![ObjectValue {
                         object_key: "2".to_string(),
                         object_label: "2".to_string(),

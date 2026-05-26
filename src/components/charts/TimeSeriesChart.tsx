@@ -393,7 +393,6 @@ export function TimeSeriesChart({
       objects: selectedObjects,
       sourceRows: baseRows,
       displayRows: compressed,
-      visibleAverageTestIds,
       testColorById,
     });
 
@@ -1402,7 +1401,6 @@ function buildTrendlines({
   objects,
   sourceRows,
   displayRows,
-  visibleAverageTestIds,
   testColorById,
 }: {
   settings: ChartTrendlineSettings;
@@ -1410,7 +1408,6 @@ function buildTrendlines({
   objects: Array<{ objectKey: string; objectLabel: string }>;
   sourceRows: ChartRow[];
   displayRows: ChartRow[];
-  visibleAverageTestIds: Set<number>;
   testColorById: Map<number, string>;
 }): TrendlineMeta[] {
   if (!settings.enabled || displayRows.length === 0) {
@@ -1423,11 +1420,11 @@ function buildTrendlines({
 
   if (settings.groupBy === 'test') {
     for (const test of tests) {
-      if (!visibleAverageTestIds.has(test.testId)) {
+      const averageKey = getAverageKey(test.testId);
+      if (!rowsHaveNumericValue(sourceRows, averageKey)) {
         continue;
       }
 
-      const averageKey = getAverageKey(test.testId);
       const computation = computeTrendline({
         key: averageKey,
         testId: test.testId,

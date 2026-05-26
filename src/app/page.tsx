@@ -132,24 +132,18 @@ export default function Page() {
 
         const [nextFiles, nextTests] = await Promise.all([
           api.getFileList(session.token, payload.archiveId),
-          api.getTestTypes(session.token),
+          api.getTestTypes(session.token, payload.archiveId),
         ]);
 
         setFiles(nextFiles);
         setTestTypes(nextTests);
-        const preserved = selectedTestIds.filter((id) =>
-          nextTests.some((item) => item.id === id),
-        );
         setSelectedTestIds(
-          preserved.length > 0
-            ? preserved
-            : nextTests[0]
-              ? [nextTests[0].id]
-              : [],
+          nextTests[0]
+            ? [nextTests[0].id]
+            : [],
         );
       },
       [
-        selectedTestIds,
         session,
         setArchiveSummary,
         setFiles,

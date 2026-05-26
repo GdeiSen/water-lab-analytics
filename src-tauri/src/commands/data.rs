@@ -18,10 +18,19 @@ pub async fn get_chart_data(
 #[tauri::command]
 pub async fn get_test_types(
     session_token: String,
+    archive_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TestType>, AppError> {
     state.require_session(&session_token)?;
-    state.db.get_all_test_types()
+    let id = match archive_id {
+        Some(id) => id,
+        None => state
+            .db
+            .get_latest_archive_id()?
+            .ok_or_else(|| AppError::Validation("Архив ещё не выбран".to_string()))?,
+    };
+
+    state.db.get_test_types_for_archive(id)
 }
 
 #[tauri::command]

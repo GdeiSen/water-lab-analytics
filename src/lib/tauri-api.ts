@@ -119,9 +119,9 @@ export const api = {
     return invoke<FileDetails>('get_file_details', { sessionToken, fileId });
   },
 
-  async getTestTypes(sessionToken: string): Promise<TestType[]> {
+  async getTestTypes(sessionToken: string, archiveId?: number): Promise<TestType[]> {
     assertTauri();
-    return invoke<TestType[]>('get_test_types', { sessionToken });
+    return invoke<TestType[]>('get_test_types', { sessionToken, archiveId });
   },
 
   async getChartData(sessionToken: string, params: ChartQuery): Promise<ChartDataset> {
