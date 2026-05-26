@@ -437,10 +437,10 @@ export default function Page() {
   );
 
   useEffect(() => {
-    if (!showAverage && guideMode === "average") {
+    if (!chartTrendline.enabled && guideMode === "average") {
       setGuideMode("series");
     }
-  }, [guideMode, showAverage]);
+  }, [chartTrendline.enabled, guideMode]);
 
   const handleExportExcel = useCallback(() => {
     void (async () => {
