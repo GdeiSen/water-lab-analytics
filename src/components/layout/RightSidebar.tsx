@@ -89,12 +89,6 @@ export function RightSidebar({
     optimization.emaAlpha,
   ]);
 
-  useEffect(() => {
-    if (optimization.averageApproximation === "raw") {
-      onOptimizationChange({ averageApproximation: "moving_average" });
-    }
-  }, [onOptimizationChange, optimization.averageApproximation]);
-
   return (
     <aside className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-x-hidden border border-ink/20 bg-white p-3">
       <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-auto overflow-x-hidden">

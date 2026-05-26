@@ -230,7 +230,7 @@ export function TimeSeriesChart({
   }, [selectedTests]);
 
   const prepared = useMemo(() => {
-    if (!data || selectedTests.length === 0) {
+    if (!data || selectedTests.length === 0 || selectedObjectKeys.length === 0) {
       return {
         rows: [],
         sourceRows: [],
@@ -266,10 +266,6 @@ export function TimeSeriesChart({
           item.value,
         ]),
       );
-      const averageMap = new Map(
-        point.averages.map((item) => [getAverageKey(item.testId), item.value]),
-      );
-
       for (const item of series) {
         row[item.key] = valueMap.get(item.key) ?? null;
       }
@@ -282,7 +278,7 @@ export function TimeSeriesChart({
         row[getAverageKey(test.testId)] =
           selectedObjects.length > 0
             ? selectedAverage
-            : (averageMap.get(getAverageKey(test.testId)) ?? null);
+            : null;
       }
       for (const object of selectedObjects) {
         row[getObjectAverageKey(object.objectKey)] =
@@ -403,7 +399,7 @@ export function TimeSeriesChart({
       trendlines,
       visibleAverageTestIds,
     } satisfies PreparedChart;
-  }, [data, optimization, selectedObjects, selectedTests, testColorById, trendline]);
+  }, [data, optimization, selectedObjectKeys.length, selectedObjects, selectedTests, testColorById, trendline]);
 
   const seriesByTest = useMemo(() => {
     const map = new Map<number, string[]>();
@@ -965,36 +961,6 @@ export function TimeSeriesChart({
                       dot={false}
                       isAnimationActive
                       strokeWidth={1.8 * scale}
-                      connectNulls
-                      strokeOpacity={isDimmed ? 0.12 : 1}
-                    />
-                  );
-                })}
-
-              {showAverage &&
-                prepared.tests.map((test) => {
-                  const averageKey = getAverageKey(test.testId);
-                  if (
-                    !visibleAverageTestIds.has(test.testId) ||
-                    !rowsHaveNumericValue(prepared.rows, averageKey)
-                  ) {
-                    return null;
-                  }
-                  const isDimmed = hoveredLegendKey !== null;
-                  return (
-                    <Line
-                      key={averageKey}
-                      yAxisId={
-                        axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
-                      }
-                      type="monotone"
-                      dataKey={averageKey}
-                      name={`${test.testName} / Общее`}
-                      stroke={darkenColor(testColorById.get(test.testId) ?? "#0f766e", 0.2)}
-                      strokeDasharray="4 4"
-                      dot={false}
-                      isAnimationActive
-                      strokeWidth={1.7 * scale}
                       connectNulls
                       strokeOpacity={isDimmed ? 0.12 : 1}
                     />

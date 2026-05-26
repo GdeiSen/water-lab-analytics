@@ -91,7 +91,7 @@ export function StatsSummary({
       return [];
     }
     if (selectedObjectKeys.length === 0) {
-      return data.objects;
+      return [];
     }
     const selected = new Set(selectedObjectKeys);
     return data.objects.filter((object) => selected.has(object.objectKey));
@@ -825,9 +825,7 @@ function calculateAverageEfficiency(
   }
 
   const allowedObjectKeys = new Set(
-    selectedObjectKeys.length > 0
-      ? selectedObjectKeys
-      : data.objects.map((object) => object.objectKey)
+    selectedObjectKeys
   );
   const values = data.points
     .map((point) => calculatePointEfficiency(point.values, link, allowedObjectKeys, guideMode))
@@ -862,9 +860,7 @@ function calculateCursorEfficiency(
     return null;
   }
   const allowedObjectKeys = new Set(
-    selectedObjectKeys.length > 0
-      ? selectedObjectKeys
-      : data.objects.map((object) => object.objectKey)
+    selectedObjectKeys
   );
   return calculatePointEfficiency(point.values, link, allowedObjectKeys, 'series');
 }

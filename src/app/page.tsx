@@ -1070,7 +1070,7 @@ function buildChartExcelPayload(
       : chartData.tests.filter((test) => selectedTestIds.includes(test.testId));
   const objects =
     selectedObjectKeys.length === 0
-      ? chartData.objects
+      ? []
       : chartData.objects.filter((object) =>
           selectedObjectKeys.includes(object.objectKey),
         );

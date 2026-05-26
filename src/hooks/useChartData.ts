@@ -21,9 +21,19 @@ export function useChartData() {
   } = useDataStore();
 
   useEffect(() => {
-    if (!session || !archiveSummary || selectedTestIds.length === 0) {
+    if (
+      !session ||
+      !archiveSummary ||
+      selectedTestIds.length === 0 ||
+      selectedObjectKeys.length === 0
+    ) {
       setChartData(null);
       setChartLoading(false);
+      setStatusMessage(
+        selectedTestIds.length > 0 && selectedObjectKeys.length === 0
+          ? 'Выберите технологический объект для построения графика'
+          : null
+      );
       return;
     }
 
