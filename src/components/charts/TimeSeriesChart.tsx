@@ -125,7 +125,7 @@ interface HoverGuideState {
   date: string;
   averageByTest: Record<number, number | null>;
   seriesByKey: Record<string, number | null>;
-  trendByTest: Record<number, number | null>;
+  trendByKey: Record<string, number | null>;
 }
 
 interface GuideValueSpec {
@@ -134,6 +134,16 @@ interface GuideValueSpec {
   value: number;
   color: string;
   dashArray?: string;
+}
+
+interface GuideChartState {
+  yAxisMap?: Record<string, { scale?: unknown }>;
+  offset?: {
+    left?: number;
+    top?: number;
+    width?: number;
+    height?: number;
+  };
 }
 
 const AXIS_WIDTH = 36;
@@ -581,6 +591,10 @@ export function TimeSeriesChart({
     });
   }, [prepared.series]);
 
+  const interactiveSeries = prepared.series.filter(
+    (series) => !hiddenSeriesKeys.has(series.key),
+  );
+
   if (isLoading && (!data || prepared.rows.length === 0)) {
     return (
       <ChartMessage height={height}>
@@ -609,7 +623,8 @@ export function TimeSeriesChart({
     ? buildGuideValueSpecs({
         guide: activeGuide,
         guideMode,
-        series: prepared.series,
+        series: interactiveSeries,
+        trendlines: prepared.trendlines,
         tests: prepared.tests,
         axisByTest: axisLayout.axisByTest,
         testColorById,
@@ -622,7 +637,8 @@ export function TimeSeriesChart({
     ? buildGuideValueSpecs({
         guide: lockedGuide,
         guideMode,
-        series: prepared.series,
+        series: interactiveSeries,
+        trendlines: prepared.trendlines,
         tests: prepared.tests,
         axisByTest: axisLayout.axisByTest,
         testColorById,
@@ -738,7 +754,9 @@ export function TimeSeriesChart({
 
   const buildHoverData = (row: ChartRow) => {
     const statsByTest = prepared.tests.map((test) => {
-      const keys = seriesByTest.get(test.testId) ?? [];
+      const keys = interactiveSeries
+        .filter((series) => series.testId === test.testId)
+        .map((series) => series.key);
       const values = keys
         .map((key) => toNullableNumber(row[key]))
         .filter((value): value is number => value !== null);
@@ -748,12 +766,15 @@ export function TimeSeriesChart({
           ? values.reduce((sum, value) => sum + value, 0) / values.length
           : null);
 
-      const trendItem = prepared.trendlines.find(
-        (item) => item.testId === test.testId,
-      );
-      const trendValue = trendItem
-        ? toNullableNumber(row[trendItem.dataKey])
-        : null;
+      const trendValues = prepared.trendlines
+        .filter((item) => item.testId === test.testId)
+        .map((item) => toNullableNumber(row[item.dataKey]))
+        .filter((value): value is number => value !== null);
+      const trendValue =
+        trendValues.length > 0
+          ? trendValues.reduce((sum, value) => sum + value, 0) /
+            trendValues.length
+          : null;
 
       return {
         testId: test.testId,
@@ -773,15 +794,13 @@ export function TimeSeriesChart({
     }
 
     const seriesByKey: Record<string, number | null> = {};
-    for (const series of prepared.series) {
+    for (const series of interactiveSeries) {
       seriesByKey[series.key] = toNullableNumber(row[series.key]);
     }
 
-    const trendByTest: Record<number, number | null> = {};
+    const trendByKey: Record<string, number | null> = {};
     for (const item of prepared.trendlines) {
-      if (item.testId !== null) {
-        trendByTest[item.testId] = toNullableNumber(row[item.dataKey]);
-      }
+      trendByKey[item.key] = toNullableNumber(row[item.dataKey]);
     }
 
     return {
@@ -789,7 +808,7 @@ export function TimeSeriesChart({
         date: String(row.date),
         averageByTest: cursorByTest,
         seriesByKey,
-        trendByTest,
+        trendByKey,
       },
       snapshot: {
         date: String(row.date),
@@ -1032,27 +1051,23 @@ export function TimeSeriesChart({
                     return null;
                   }
 
-                  const chartState = chartProps as {
-                    yAxisMap?: Record<
-                      string,
-                      { scale?: (value: number) => number }
-                    >;
-                    offset?: { top?: number; height?: number };
-                  };
+                  const chartState = chartProps as GuideChartState;
                   const yAxisMap = chartState?.yAxisMap ?? {};
-                  const offsetTop = chartState?.offset?.top;
-                  const offsetHeight = chartState?.offset?.height;
+                  const plotLeft =
+                    asNumber(chartState?.offset?.left) ?? activeFrame.plotLeft;
                   const plotTop =
-                    typeof offsetTop === "number"
-                      ? offsetTop
-                      : activeFrame.plotTop;
+                    asNumber(chartState?.offset?.top) ?? activeFrame.plotTop;
+                  const plotWidth =
+                    asNumber(chartState?.offset?.width) ?? activeFrame.plotWidth;
                   const plotHeight =
-                    typeof offsetHeight === "number"
-                      ? offsetHeight
-                      : activeFrame.plotHeight;
-                  const leftMostAxisX =
-                    activeFrame.plotLeft -
-                    (axisLayout.leftCount - 1) * axisWidth;
+                    asNumber(chartState?.offset?.height) ??
+                    activeFrame.plotHeight;
+                  const plotBottom = plotTop + plotHeight;
+                  const cursorX = clamp(
+                    activeFrame.cursorX,
+                    plotLeft,
+                    plotLeft + plotWidth,
+                  );
 
                   return (
                     <g>
@@ -1064,23 +1079,18 @@ export function TimeSeriesChart({
                           return null;
                         }
 
-                        const scaledY = yAxisMap?.[guide.axisId]?.scale?.(
-                          guide.value,
-                        );
-                        const y =
-                          typeof scaledY === "number" &&
-                          Number.isFinite(scaledY)
-                            ? scaledY
-                            : valueToPixel(
-                                guide.value,
-                                axisGroup.domain,
-                                plotTop,
-                                plotHeight,
-                              );
+                        const y = resolveGuideY({
+                          value: guide.value,
+                          axis: yAxisMap[guide.axisId],
+                          domain: axisGroup.domain,
+                          plotTop,
+                          plotHeight,
+                        });
+                        if (y < plotTop - 1 || y > plotBottom + 1) {
+                          return null;
+                        }
 
-                        const axisLineX =
-                          activeFrame.plotLeft -
-                          axisGroup.sideIndex * axisWidth;
+                        const axisLineX = plotLeft - axisGroup.sideIndex * axisWidth;
                         const textLabel = formatGuideValue(guide.value);
                         const textX = axisLineX - 1 * scale;
                         const textY = clamp(
@@ -1100,13 +1110,21 @@ export function TimeSeriesChart({
                         return (
                           <g key={`guide-overlay-${guide.key}`}>
                             <line
-                              x1={leftMostAxisX}
+                              x1={plotLeft}
                               y1={y}
-                              x2={activeFrame.cursorX}
+                              x2={cursorX}
                               y2={y}
                               stroke={guide.color}
                               strokeDasharray={guide.dashArray}
                               strokeOpacity={0.65}
+                              strokeWidth={1 * scale}
+                            />
+                            <circle
+                              cx={cursorX}
+                              cy={y}
+                              r={3.2 * scale}
+                              fill={guide.color}
+                              stroke="#ffffff"
                               strokeWidth={1 * scale}
                             />
                             <rect
@@ -1589,6 +1607,7 @@ function buildGuideValueSpecs({
   guide,
   guideMode,
   series,
+  trendlines,
   tests,
   axisByTest,
   testColorById,
@@ -1599,6 +1618,7 @@ function buildGuideValueSpecs({
   guide: HoverGuideState;
   guideMode: ChartGuideMode;
   series: SeriesMeta[];
+  trendlines: TrendlineMeta[];
   tests: ChartTest[];
   axisByTest: Map<number, string>;
   testColorById: Map<number, string>;
@@ -1626,18 +1646,21 @@ function buildGuideValueSpecs({
     return seriesSpecs;
   }
 
-  const trendSpecs = tests.flatMap((test) => {
-    const value = guide.trendByTest[test.testId];
+  const trendSpecs = trendlines.flatMap((item) => {
+    const value = guide.trendByKey[item.key];
     if (typeof value !== "number" || !Number.isFinite(value)) {
       return [];
     }
 
     return [
       {
-        key: `trend-${test.testId}`,
-        axisId: axisByTest.get(test.testId) ?? fallbackAxisId,
+        key: `trend-${item.key}`,
+        axisId: axisByTest.get(item.testId) ?? fallbackAxisId,
         value,
-        color: darkenColor(trendColorById.get(test.testId) ?? "#0f766e", 0.15),
+        color: darkenColor(
+          item.color ?? trendColorById.get(item.testId) ?? "#0f766e",
+          0.15,
+        ),
         dashArray: "6 4",
       } satisfies GuideValueSpec,
     ];
@@ -1937,6 +1960,30 @@ function renderVerticalGuideLabel(props: GuideLabelProps, text: string) {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveGuideY({
+  value,
+  axis,
+  domain,
+  plotTop,
+  plotHeight,
+}: {
+  value: number;
+  axis?: { scale?: unknown };
+  domain: [number, number];
+  plotTop: number;
+  plotHeight: number;
+}): number {
+  const scale = axis?.scale;
+  if (typeof scale === "function") {
+    const scaled = scale(value);
+    if (typeof scaled === "number" && Number.isFinite(scaled)) {
+      return scaled;
+    }
+  }
+
+  return valueToPixel(value, domain, plotTop, plotHeight);
 }
 
 function valueToPixel(
