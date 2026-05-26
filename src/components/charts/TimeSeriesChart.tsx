@@ -109,10 +109,6 @@ interface GuideLabelProps {
   viewBox?: GuideLabelViewBox;
 }
 
-interface AxisLabelProps {
-  viewBox?: GuideLabelViewBox;
-}
-
 interface GuideFrame {
   cursorX: number;
   plotLeft: number;
@@ -665,6 +661,10 @@ export function TimeSeriesChart({
     axisViewportHeight - axisPlotTop - axisPlotBottom,
   );
   const axisPlotLeft = leftMargin + axisLayout.leftCount * axisWidth;
+  const axisStripWidth = Math.round(26 * scale);
+  const axisStripHeight = Math.max(2, 3 * scale);
+  const axisStripGap = Math.max(2, 2.5 * scale);
+  const axisStripTop = axisPlotTop + axisPlotHeight + 6 * scale;
 
   const adjustAxisTickDensity = (axisId: string, delta: number) => {
     setAxisTickCounts((previous) => {
@@ -954,9 +954,6 @@ export function TimeSeriesChart({
                     axisTickCounts[group.axisId] ?? DEFAULT_AXIS_TICK_COUNT
                   }
                   allowDataOverflow
-                  label={(props: AxisLabelProps) =>
-                    renderAxisColorStrips(props, group.tests, testColorById, scale)
-                  }
                 />
               ))}
 
@@ -1225,6 +1222,38 @@ export function TimeSeriesChart({
                   >
                     <ChevronDown style={{ width: 12 * scale, height: 12 * scale }} />
                   </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="pointer-events-none absolute inset-0 z-10">
+            {axisLayout.groups.map((group) => {
+              const axisLineX = axisPlotLeft - group.sideIndex * axisWidth;
+              const stripLeft = axisLineX - axisStripWidth;
+
+              return (
+                <div
+                  key={`axis-color-strips-${group.axisId}`}
+                  className="absolute"
+                  style={{
+                    left: stripLeft,
+                    top: axisStripTop,
+                    width: axisStripWidth,
+                  }}
+                >
+                  {group.tests.map((test, index) => (
+                    <div
+                      key={`axis-strip-${group.axisId}-${test.testId}`}
+                      style={{
+                        width: axisStripWidth,
+                        height: axisStripHeight,
+                        marginTop: index === 0 ? 0 : axisStripGap,
+                        borderRadius: 1.5 * scale,
+                        backgroundColor:
+                          testColorById.get(test.testId) ?? "#0f766e",
+                      }}
+                    />
+                  ))}
                 </div>
               );
             })}
@@ -1730,45 +1759,6 @@ function darkenColor(hexColor: string, ratio: number): string {
     return next.toString(16).padStart(2, "0");
   });
   return `#${channels.join("")}`;
-}
-
-function renderAxisColorStrips(
-  props: AxisLabelProps,
-  tests: ChartTest[],
-  testColorById: Map<number, string>,
-  scale = 1,
-) {
-  if (tests.length === 0) {
-    return null;
-  }
-
-  const viewBox = props?.viewBox ?? {};
-  const x = typeof viewBox.x === "number" ? viewBox.x : 0;
-  const y = typeof viewBox.y === "number" ? viewBox.y : 0;
-  const width = typeof viewBox.width === "number" ? viewBox.width : 0;
-  const height = typeof viewBox.height === "number" ? viewBox.height : 0;
-
-  const stripWidth = 26 * scale;
-  const stripHeight = 3 * scale;
-  const gap = 2.5 * scale;
-  const stripX = x + width - stripWidth;
-  const startY = y + height + 6 * scale;
-
-  return (
-    <g>
-      {tests.map((test, index) => (
-        <rect
-          key={`axis-strip-${test.testId}`}
-          x={stripX}
-          y={startY + index * (stripHeight + gap)}
-          width={stripWidth}
-          height={stripHeight}
-          rx={1.5}
-          fill={testColorById.get(test.testId) ?? "#0f766e"}
-        />
-      ))}
-    </g>
-  );
 }
 
 function toNullableNumber(

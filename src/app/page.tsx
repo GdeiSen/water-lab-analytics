@@ -38,6 +38,7 @@ import type {
   ExcelExportPayload,
   LicenseStatus,
   ParameterLink,
+  TestType,
 } from "@/lib/types";
 import { useDataStore } from "@/stores/data-store";
 
@@ -242,7 +243,15 @@ export default function Page() {
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [files]);
 
-  const autoParameterLinks = useMemo(() => buildParameterLinks(testTypes), [testTypes]);
+  const visibleTestTypes = useMemo(
+    () => filterDuplicateScopedTestTypes(testTypes),
+    [testTypes],
+  );
+
+  const autoParameterLinks = useMemo(
+    () => buildParameterLinks(visibleTestTypes),
+    [visibleTestTypes],
+  );
   const parameterLinks = useMemo(() => {
     const disabled = new Set(disabledAutoParameterLinkIds);
     const effectiveAuto = autoParameterLinks.filter((link) => !disabled.has(link.id));
@@ -252,7 +261,7 @@ export default function Page() {
   }, [autoParameterLinks, disabledAutoParameterLinkIds, manualParameterLinks]);
 
   useEffect(() => {
-    const availableIds = new Set(testTypes.map((test) => test.id));
+    const availableIds = new Set(visibleTestTypes.map((test) => test.id));
     setManualParameterLinks((links) =>
       links.filter(
         (link) => availableIds.has(link.inputTestId) && availableIds.has(link.outputTestId),
@@ -262,7 +271,7 @@ export default function Page() {
       ids.filter((id) => autoParameterLinks.some((link) => link.id === id)),
     );
     setPendingLinkTestId((id) => (id && availableIds.has(id) ? id : null));
-  }, [autoParameterLinks, testTypes]);
+  }, [autoParameterLinks, visibleTestTypes]);
 
   const handleToggleParameterLink = useCallback(
     (testId: number) => {
@@ -412,7 +421,7 @@ export default function Page() {
   );
 
   const effectiveSelectedTestIds = useMemo(() => {
-    const available = new Set(testTypes.map((item) => item.id));
+    const available = new Set(visibleTestTypes.map((item) => item.id));
     if (selectedTestIds.length === 0) {
       return [];
     }
@@ -420,8 +429,16 @@ export default function Page() {
     if (filtered.length > 0) {
       return filtered;
     }
-    return testTypes[0] ? [testTypes[0].id] : [];
-  }, [selectedTestIds, testTypes]);
+    return visibleTestTypes[0] ? [visibleTestTypes[0].id] : [];
+  }, [selectedTestIds, visibleTestTypes]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleTestTypes.map((test) => test.id));
+    const filtered = selectedTestIds.filter((id) => visibleIds.has(id));
+    if (filtered.length !== selectedTestIds.length) {
+      setSelectedTestIds(filtered);
+    }
+  }, [selectedTestIds, setSelectedTestIds, visibleTestTypes]);
 
   const effectiveSelectedObjectKeys = useMemo(() => {
     const available = new Set(availableObjects.map((item) => item.key));
@@ -933,7 +950,7 @@ export default function Page() {
             style={rightSidebarStyle}
           >
             <RightSidebar
-              testTypes={testTypes}
+              testTypes={visibleTestTypes}
               selectedTestIds={effectiveSelectedTestIds}
               onSelectTests={setSelectedTestIds}
               parameterLinks={parameterLinks}
@@ -1099,6 +1116,42 @@ function buildChartExcelPayload(
     headerRows,
     rows,
   };
+}
+
+function filterDuplicateScopedTestTypes(testTypes: TestType[]): TestType[] {
+  const aerotankBases = new Set(
+    testTypes
+      .filter((test) => isAerotankScopedTest(test.displayName))
+      .map((test) => scopeAgnosticTestName(test.displayName)),
+  );
+
+  return testTypes.filter((test) => {
+    if (!isSectionScopedTest(test.displayName)) {
+      return true;
+    }
+    return !aerotankBases.has(scopeAgnosticTestName(test.displayName));
+  });
+}
+
+function isAerotankScopedTest(value: string): boolean {
+  const normalized = value.toLocaleLowerCase("ru-RU");
+  return normalized.includes("аэротенк") && !normalized.includes("секции");
+}
+
+function isSectionScopedTest(value: string): boolean {
+  const normalized = value.toLocaleLowerCase("ru-RU");
+  return normalized.includes("секции") && !normalized.includes("аэротенк");
+}
+
+function scopeAgnosticTestName(value: string): string {
+  return value
+    .toLocaleLowerCase("ru-RU")
+    .replaceAll("аэротенка", "объекта")
+    .replaceAll("аэротенку", "объекта")
+    .replaceAll("аэротенк", "объекта")
+    .replaceAll("секции", "объекта")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildBrowserExcelDocument(payload: ExcelExportPayload): string {
