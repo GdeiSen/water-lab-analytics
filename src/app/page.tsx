@@ -92,6 +92,7 @@ export default function Page() {
     selectedObjectKeys,
     dateRange,
     chartData,
+    isChartLoading,
     parseProgress,
     searchQuery,
     showAverage,
@@ -901,6 +902,7 @@ export default function Page() {
             dateRange={dateRange}
             onDateRangeChange={setDateRange}
             chartData={chartData}
+            isChartLoading={isChartLoading}
             showAverage={showAverage}
             guideMode={guideMode}
             chartOptimization={chartOptimization}

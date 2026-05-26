@@ -26,6 +26,7 @@ interface MainAreaProps {
   dateRange: DateRange;
   onDateRangeChange: (range: DateRange) => void;
   chartData: ChartDataset | null;
+  isChartLoading: boolean;
   showAverage: boolean;
   guideMode: ChartGuideMode;
   chartOptimization: ChartOptimizationSettings;
@@ -45,6 +46,7 @@ export function MainArea({
   dateRange,
   onDateRangeChange,
   chartData,
+  isChartLoading,
   showAverage,
   guideMode,
   chartOptimization,
@@ -153,6 +155,7 @@ export function MainArea({
 
           <TimeSeriesChart
             data={chartData}
+            isLoading={isChartLoading}
             selectedTestIds={selectedTestIds}
             selectedObjectKeys={selectedObjectKeys}
             showAverage={showAverage}

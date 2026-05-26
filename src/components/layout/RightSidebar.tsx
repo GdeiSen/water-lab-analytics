@@ -235,6 +235,10 @@ export function RightSidebar({
                   <option value="test">Испытаниям</option>
                   <option value="object">Объектам</option>
                 </select>
+                <span className="text-[11px] leading-snug text-ink/45">
+                  По испытаниям: тренд среднего значения выбранных объектов для каждого показателя.
+                  По объектам: тренд среднего значения выбранных показателей для каждого объекта.
+                </span>
               </label>
 
               <label className="min-w-0 flex flex-col gap-1 text-xs text-ink/75">

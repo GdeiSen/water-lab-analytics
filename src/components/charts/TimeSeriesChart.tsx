@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -24,6 +24,7 @@ import { format, parseISO } from "date-fns";
 
 import { resolveEffectiveOptimization } from "@/lib/chart-optimization";
 import { computeTrendline } from "@/lib/trendlines";
+import { Spinner } from "@/components/ui/Spinner";
 import type {
   ChartDataset,
   ChartGuideMode,
@@ -39,6 +40,7 @@ import { TANK_COLORS } from "@/lib/utils";
 
 interface TimeSeriesChartProps {
   data: ChartDataset | null;
+  isLoading: boolean;
   selectedTestIds: number[];
   selectedObjectKeys: string[];
   showAverage: boolean;
@@ -84,12 +86,6 @@ interface PreparedChart {
   series: SeriesMeta[];
   trendlines: TrendlineMeta[];
   visibleAverageTestIds: Set<number>;
-}
-
-interface PreparedChart {
-  rows: ChartRow[];
-  tests: ChartTest[];
-  series: SeriesMeta[];
 }
 
 interface AxisGroup {
@@ -152,6 +148,7 @@ const AXIS_CONTROL_VERTICAL_INSET = 2;
 
 export function TimeSeriesChart({
   data,
+  isLoading,
   selectedTestIds,
   selectedObjectKeys,
   showAverage,
@@ -365,8 +362,10 @@ export function TimeSeriesChart({
       });
     }
 
+    const visibleSeries = series.filter((item) => rowsHaveNumericValue(compressed, item.key));
+
     const localSeriesByTest = new Map<number, string[]>();
-    for (const item of series) {
+    for (const item of visibleSeries) {
       if (!localSeriesByTest.has(item.testId)) {
         localSeriesByTest.set(item.testId, []);
       }
@@ -400,7 +399,7 @@ export function TimeSeriesChart({
       rows: compressed,
       sourceRows: baseRows,
       tests: selectedTests,
-      series,
+      series: visibleSeries,
       trendlines,
       visibleAverageTestIds,
     } satisfies PreparedChart;
@@ -418,6 +417,16 @@ export function TimeSeriesChart({
   }, [prepared.series]);
 
   const visibleAverageTestIds = prepared.visibleAverageTestIds;
+  const hasVisibleAverageLine =
+    showAverage &&
+    prepared.tests.some(
+      (test) =>
+        visibleAverageTestIds.has(test.testId) &&
+        rowsHaveNumericValue(prepared.rows, getAverageKey(test.testId)),
+    );
+  const hasVisibleTrendline =
+    trendline.enabled &&
+    prepared.trendlines.some((item) => rowsHaveNumericValue(prepared.rows, item.dataKey));
 
   const axisLayout = useMemo(() => {
     const grouped = new Map<
@@ -566,18 +575,32 @@ export function TimeSeriesChart({
     onTrendlinesChange?.(prepared.trendlines.map((item) => item.report));
   }, [onTrendlinesChange, prepared.trendlines]);
 
+  useEffect(() => {
+    const availableSeriesKeys = new Set(prepared.series.map((series) => series.key));
+    setHiddenSeriesKeys((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((seriesKey) => availableSeriesKeys.has(seriesKey)),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [prepared.series]);
+
+  if (isLoading && (!data || prepared.rows.length === 0)) {
+    return (
+      <ChartMessage height={height}>
+        <Spinner size="md" />
+        <span>Загрузка данных графика...</span>
+      </ChartMessage>
+    );
+  }
+
   if (
     !data ||
     prepared.rows.length === 0 ||
-    (prepared.series.length === 0 && !showAverage)
+    (prepared.series.length === 0 && !hasVisibleAverageLine && !hasVisibleTrendline)
   ) {
     return (
-      <div
-        className="flex items-center justify-center border border-ink/20 bg-white text-sm text-ink/60"
-        style={{ height }}
-      >
-        Нет данных для отображения графика.
-      </div>
+      <ChartMessage height={height}>Нет данных для отображения графика.</ChartMessage>
     );
   }
 
@@ -948,6 +971,36 @@ export function TimeSeriesChart({
                   );
                 })}
 
+              {showAverage &&
+                prepared.tests.map((test) => {
+                  const averageKey = getAverageKey(test.testId);
+                  if (
+                    !visibleAverageTestIds.has(test.testId) ||
+                    !rowsHaveNumericValue(prepared.rows, averageKey)
+                  ) {
+                    return null;
+                  }
+                  const isDimmed = hoveredLegendKey !== null;
+                  return (
+                    <Line
+                      key={averageKey}
+                      yAxisId={
+                        axisLayout.axisByTest.get(test.testId) ?? fallbackAxisId
+                      }
+                      type="monotone"
+                      dataKey={averageKey}
+                      name={`${test.testName} / Общее`}
+                      stroke={darkenColor(testColorById.get(test.testId) ?? "#0f766e", 0.2)}
+                      strokeDasharray="4 4"
+                      dot={false}
+                      isAnimationActive
+                      strokeWidth={1.7 * scale}
+                      connectNulls
+                      strokeOpacity={isDimmed ? 0.12 : 1}
+                    />
+                  );
+                })}
+
               {trendline.enabled &&
                 prepared.trendlines.map((item) => {
                   const isSmoothing =
@@ -1192,6 +1245,14 @@ export function TimeSeriesChart({
               );
             })}
           </div>
+          {isLoading && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
+              <div className="flex items-center gap-2 border border-ink/20 bg-white px-3 py-2 text-sm font-medium text-ink/70 shadow-sm">
+                <Spinner size="sm" />
+                <span>Обновление графика...</span>
+              </div>
+            </div>
+          )}
         </div>
         {prepared.tests.length > 0 && (
           <div
@@ -1293,6 +1354,23 @@ export function TimeSeriesChart({
   );
 }
 
+function ChartMessage({
+  height,
+  children,
+}: {
+  height: number;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="flex items-center justify-center gap-2 border border-ink/20 bg-white text-sm text-ink/60"
+      style={{ height }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function getSeriesKey(testId: number, objectKey: string): string {
   return `series_${testId}__${objectKey}`;
 }
@@ -1340,7 +1418,7 @@ function buildTrendlines({
       const computation = computeTrendline({
         key: averageKey,
         testId: test.testId,
-        label: `${test.testName} (тренд)`,
+        label: test.testName,
         color: darkenColor(testColorById.get(test.testId) ?? "#0f766e", 0.38),
         source: "average",
         fitDates,
@@ -1360,8 +1438,8 @@ function buildTrendlines({
       const objAvgKey = getObjectAverageKey(object.objectKey);
       const computation = computeTrendline({
         key: objAvgKey,
-        testId: tests[i % tests.length]?.testId ?? 0,
-        label: `${object.objectLabel} (тренд)`,
+        testId: tests[0]?.testId ?? 0,
+        label: object.objectLabel,
         color: darkenColor(
           TANK_COLORS[i % TANK_COLORS.length],
           0.38,
@@ -1487,6 +1565,10 @@ function getValueRange(
     return null;
   }
   return [min, max];
+}
+
+function rowsHaveNumericValue(rows: ChartRow[], key: string): boolean {
+  return rows.some((row) => toNullableNumber(row[key]) !== null);
 }
 
 function buildNiceDomain(min: number, max: number): [number, number] {

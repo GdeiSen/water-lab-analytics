@@ -24,6 +24,7 @@ interface DataStore {
   selectedObjectKeys: string[];
   dateRange: DateRange;
   chartData: ChartDataset | null;
+  isChartLoading: boolean;
   parseProgress: ParseProgress | null;
   isBusy: boolean;
   searchQuery: string;
@@ -40,6 +41,7 @@ interface DataStore {
   setSelectedObjectKeys: (keys: string[]) => void;
   setDateRange: (range: DateRange) => void;
   setChartData: (dataset: ChartDataset | null) => void;
+  setChartLoading: (loading: boolean) => void;
   setParseProgress: (progress: ParseProgress | null) => void;
   setBusy: (busy: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -88,6 +90,7 @@ export const useDataStore = create<DataStore>((set) => ({
   selectedObjectKeys: [],
   dateRange: initialDateRange,
   chartData: null,
+  isChartLoading: false,
   parseProgress: null,
   isBusy: false,
   searchQuery: '',
@@ -104,6 +107,7 @@ export const useDataStore = create<DataStore>((set) => ({
   setSelectedObjectKeys: (selectedObjectKeys) => set({ selectedObjectKeys }),
   setDateRange: (dateRange) => set({ dateRange }),
   setChartData: (chartData) => set({ chartData }),
+  setChartLoading: (isChartLoading) => set({ isChartLoading }),
   setParseProgress: (parseProgress) => set({ parseProgress }),
   setBusy: (isBusy) => set({ isBusy }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
@@ -134,6 +138,7 @@ export const useDataStore = create<DataStore>((set) => ({
       selectedObjectKeys: [],
       dateRange: initialDateRange,
       chartData: null,
+      isChartLoading: false,
       parseProgress: null,
       isBusy: false,
       searchQuery: '',

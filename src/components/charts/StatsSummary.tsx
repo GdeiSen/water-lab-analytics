@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileDown, Maximize2, Minimize2, Search } from 'lucide-react';
+import { Check, Copy, FileDown, Maximize2, Minimize2, Search } from 'lucide-react';
 
 import type {
   ChartDataset,
@@ -548,13 +548,19 @@ function StatsCard({
           <span className="text-[10px] uppercase tracking-wide text-ink/40">
             {formatMode(trendReport.mode)}
           </span>
-          <p
-            className="cursor-pointer text-xs text-ink/65 transition hover:text-ink"
-            title={copied ? 'Скопировано' : 'Нажмите, чтобы скопировать формулу'}
-            onClick={handleCopyEquation}
-          >
-            {trendReport.equation}
-          </p>
+          <div className="mt-1 flex items-start gap-1.5">
+            <p className="min-w-0 flex-1 break-words font-mono text-xs text-ink/70">
+              {trendReport.equation}
+            </p>
+            <button
+              type="button"
+              className="flex h-7 w-7 shrink-0 items-center justify-center border border-ink/20 bg-white text-ink/65 transition hover:bg-ink/5 hover:text-ink"
+              title={copied ? 'Скопировано' : 'Скопировать формулу'}
+              onClick={handleCopyEquation}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
           {trendlineSettings.showRSquared && trendReport.rSquared !== null && (
             <p className="text-xs text-ink/50">R²: {formatRSquared(trendReport.rSquared)}</p>
           )}
@@ -600,7 +606,7 @@ function GroupedMetricRows({
       {pearsonEntries?.map((entry) => (
         <div key={`pearson-${entry.key}`} className="grid gap-2 py-1.5 md:grid-cols-[160px_1fr_120px]">
           <span className="font-semibold uppercase tracking-wide text-ink/55">Пирсон</span>
-          <span className="min-w-0 truncate text-ink/70">
+          <span className="min-w-0 break-words text-ink/70">
             {entry.label}
             <span className="ml-2 text-ink/40">точек: {entry.pairsUsed}</span>
             <span className="ml-2 text-ink/45">{entry.warning ?? describeCorrelation(entry.coefficient)}</span>

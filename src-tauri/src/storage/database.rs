@@ -535,16 +535,22 @@ impl Database {
                 }
             }
 
-            all_object_meta
-                .entry(object_key.clone())
-                .and_modify(|current| {
-                    if object_order < current.1 {
-                        *current = (object_label.clone(), object_order, object_active);
-                    } else if object_active {
-                        current.2 = true;
-                    }
-                })
-                .or_insert((object_label.clone(), object_order, object_active));
+            if object_filter.is_some() || object_active {
+                all_object_meta
+                    .entry(object_key.clone())
+                    .and_modify(|current| {
+                        if object_order < current.1 {
+                            *current = (object_label.clone(), object_order, object_active);
+                        } else if object_active {
+                            current.2 = true;
+                        }
+                    })
+                    .or_insert((object_label.clone(), object_order, object_active));
+            }
+
+            if !object_active {
+                continue;
+            }
 
             if let Some(filter) = &test_filter {
                 if !filter.contains(&test_id) {
@@ -856,5 +862,97 @@ fn calculate_stats(mut values: Vec<f64>) -> ChartStats {
         median,
         std_dev: Some(variance.sqrt()),
         points_with_values: len,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+    use tempfile::tempdir;
+
+    use super::{Database, PersistedFile};
+    use crate::models::{DataQuery, FileStatus, Measurement, ObjectValue, ParsedFile};
+
+    #[test]
+    fn query_chart_data_omits_inactive_object_values_even_when_selected() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+        let archive_id = db
+            .get_or_create_archive("/tmp/archive", 2)
+            .expect("archive id");
+
+        db.upsert_parsed_files(
+            archive_id,
+            &[
+                persisted_file(
+                    "03.05.2026.xlsx",
+                    "2026-05-03",
+                    true,
+                    10.0,
+                ),
+                persisted_file(
+                    "04.05.2026.xlsx",
+                    "2026-05-04",
+                    false,
+                    20.0,
+                ),
+            ],
+        )
+        .expect("insert files");
+
+        let test_id = db
+            .get_all_test_types()
+            .expect("test types")
+            .into_iter()
+            .find(|test| test.display_name == "Азот")
+            .expect("azot test")
+            .id;
+
+        let dataset = db
+            .query_chart_data(&DataQuery {
+                session_token: "test".to_string(),
+                archive_id,
+                test_ids: vec![test_id],
+                object_keys: vec!["2".to_string()],
+                date_from: None,
+                date_to: None,
+            })
+            .expect("chart data");
+
+        assert_eq!(dataset.points.len(), 1);
+        assert_eq!(dataset.points[0].date, "2026-05-03");
+        assert_eq!(dataset.points[0].values[0].value, Some(10.0));
+        assert_eq!(dataset.stats_by_test[0].stats.points_with_values, 1);
+    }
+
+    fn persisted_file(
+        filename: &str,
+        date: &str,
+        object_active: bool,
+        value: f64,
+    ) -> PersistedFile {
+        PersistedFile {
+            parsed: ParsedFile {
+                date: NaiveDate::parse_from_str(date, "%Y-%m-%d").expect("date"),
+                filename: filename.to_string(),
+                status: FileStatus::Ok,
+                warnings: Vec::new(),
+                object_count: 1,
+                objects: Vec::new(),
+                measurements: vec![Measurement {
+                    test_name: "Азот".to_string(),
+                    test_name_raw: "Азот".to_string(),
+                    values: vec![ObjectValue {
+                        object_key: "2".to_string(),
+                        object_label: "2".to_string(),
+                        object_order: 2,
+                        object_active,
+                        value: Some(value),
+                        raw_value: value.to_string(),
+                    }],
+                }],
+            },
+            file_hash: format!("{filename}-{value}"),
+        }
     }
 }
