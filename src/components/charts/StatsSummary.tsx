@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, FileDown, Maximize2, Minimize2, Search } from 'lucide-react';
+import { toast } from 'sonner';
 
 import type {
   ChartDataset,
@@ -514,12 +515,17 @@ function StatsCard({
 
   const handleCopyEquation = () => {
     if (trendReport?.equation) {
-      void navigator.clipboard.writeText(trendReport.equation).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+      void copyToClipboard(trendReport.equation, 'Формула скопирована').then((success) => {
+        if (success) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }
       });
     }
   };
+
+  const hoverValueLabel = formatNumber(hoverValue);
+  const canCopyHoverValue = hoverValueLabel !== '\u2014';
 
   return (
     <div className="border border-ink/15 bg-[#f7f8fa] p-2">
@@ -527,15 +533,23 @@ function StatsCard({
         <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-ink/70">
           {entry.testName}
         </p>
-        <div
-          className="shrink-0 border bg-white px-2 py-0.5 text-xs font-semibold"
+        <button
+          type="button"
+          disabled={!canCopyHoverValue}
+          onClick={() => {
+            if (canCopyHoverValue) {
+              void copyToClipboard(hoverValueLabel, 'Значение скопировано');
+            }
+          }}
+          className="shrink-0 border bg-white px-2 py-0.5 text-xs font-semibold transition enabled:cursor-copy enabled:hover:bg-ink/5 disabled:cursor-default"
           style={{
             borderColor: color,
             color
           }}
+          title={canCopyHoverValue ? 'Скопировать значение' : undefined}
         >
-          {formatNumber(hoverValue)}
-        </div>
+          {hoverValueLabel}
+        </button>
       </div>
       <div className="grid grid-cols-4 gap-1">
         <Stat title="Min" value={formatNumber(entry.stats.min)} />
@@ -577,12 +591,52 @@ function Stat({
   title: string;
   value: string;
 }) {
+  const canCopy = value !== '\u2014';
+
+  const handleCopy = () => {
+    if (!canCopy) {
+      return;
+    }
+    void copyToClipboard(value, 'Значение скопировано');
+  };
+
   return (
     <div className="border border-ink/15 bg-white p-1.5">
       <p className="text-[10px] uppercase tracking-wide text-ink/50">{title}</p>
-      <p className="text-xs font-semibold text-ink">{value}</p>
+      <button
+        type="button"
+        onClick={handleCopy}
+        disabled={!canCopy}
+        className="block text-left text-xs font-semibold text-ink transition enabled:cursor-copy enabled:hover:text-surge disabled:cursor-default"
+        title={canCopy ? 'Скопировать значение' : undefined}
+      >
+        {value}
+      </button>
     </div>
   );
+}
+
+async function copyToClipboard(value: string, successMessage: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    toast.success(successMessage);
+    return true;
+  } catch {
+    toast.error('Не удалось скопировать значение');
+    return false;
+  }
 }
 
 function GroupedMetricRows({
