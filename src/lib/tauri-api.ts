@@ -7,6 +7,8 @@ import type {
   AuthToken,
   ChartDataset,
   ChartQuery,
+  DocumentCategory,
+  DocumentInfo,
   ExcelExportPayload,
   FileChangedEvent,
   FileDetails,
@@ -14,6 +16,8 @@ import type {
   FileInfo,
   LicenseStatus,
   ParseProgress,
+  RetroFileDetails,
+  RetroFileInfo,
   TestType
 } from '@/lib/types';
 
@@ -185,5 +189,151 @@ export const api = {
   async onFileError(handler: (payload: FileErrorEvent) => void): Promise<UnlistenFn> {
     assertTauri();
     return listen<FileErrorEvent>('file:error', (event) => handler(event.payload));
+  },
+
+  // --- Retrospective ("retro") mode -----------------------------------------------
+
+  async selectRetroArchive(sessionToken: string, archivePath: string): Promise<ArchiveSummary> {
+    assertTauri();
+    return invoke<ArchiveSummary>('select_retro_archive', { sessionToken, archivePath });
+  },
+
+  async rescanRetroArchive(sessionToken: string, archiveId: number): Promise<ArchiveSummary> {
+    assertTauri();
+    return invoke<ArchiveSummary>('rescan_retro_archive', { sessionToken, archiveId });
+  },
+
+  async getRetroFileList(sessionToken: string, archiveId?: number): Promise<RetroFileInfo[]> {
+    assertTauri();
+    return invoke<RetroFileInfo[]>('get_retro_file_list', { sessionToken, archiveId });
+  },
+
+  async getRetroFileDetails(sessionToken: string, fileId: number): Promise<RetroFileDetails> {
+    assertTauri();
+    return invoke<RetroFileDetails>('get_retro_file_details', { sessionToken, fileId });
+  },
+
+  /**
+   * With `fileId` — only the parameters of that sheet, which is what the
+   * retro sidebar lists. Without it — every parameter of the archive, used
+   * to keep showing parameters that stay selected from another sheet.
+   */
+  async getRetroTestTypes(
+    sessionToken: string,
+    archiveId?: number,
+    fileId?: number
+  ): Promise<TestType[]> {
+    assertTauri();
+    return invoke<TestType[]>('get_retro_test_types', { sessionToken, archiveId, fileId });
+  },
+
+  async getRetroChartData(sessionToken: string, params: ChartQuery): Promise<ChartDataset> {
+    assertTauri();
+    return invoke<ChartDataset>('get_retro_chart_data', {
+      query: {
+        sessionToken,
+        archiveId: params.archiveId,
+        testIds: params.testIds,
+        objectKeys: params.objectKeys,
+        dateFrom: params.dateFrom,
+        dateTo: params.dateTo
+      }
+    });
+  },
+
+  async getLastRetroArchivePath(sessionToken: string): Promise<string | null> {
+    assertTauri();
+    return invoke<string | null>('get_last_retro_archive_path', { sessionToken });
+  },
+
+  async onRetroParseProgress(handler: (payload: ParseProgress) => void): Promise<UnlistenFn> {
+    assertTauri();
+    return listen<ParseProgress>('retro:progress', (event) => handler(event.payload));
+  },
+
+  async onRetroParseComplete(handler: (payload: ArchiveSummary) => void): Promise<UnlistenFn> {
+    assertTauri();
+    return listen<ArchiveSummary>('retro:complete', (event) => handler(event.payload));
+  },
+
+  // --- Document container -----------------------------------------------------------
+
+  async listDocumentCategories(sessionToken: string): Promise<DocumentCategory[]> {
+    assertTauri();
+    return invoke<DocumentCategory[]>('list_document_categories', { sessionToken });
+  },
+
+  async createDocumentCategory(sessionToken: string, name: string): Promise<DocumentCategory> {
+    assertTauri();
+    return invoke<DocumentCategory>('create_document_category', { sessionToken, name });
+  },
+
+  async renameDocumentCategory(sessionToken: string, categoryId: number, name: string): Promise<DocumentCategory> {
+    assertTauri();
+    return invoke<DocumentCategory>('rename_document_category', { sessionToken, categoryId, name });
+  },
+
+  async deleteDocumentCategory(sessionToken: string, categoryId: number): Promise<void> {
+    assertTauri();
+    await invoke('delete_document_category', { sessionToken, categoryId });
+  },
+
+  async listDocuments(sessionToken: string, categoryId: number | null): Promise<DocumentInfo[]> {
+    assertTauri();
+    return invoke<DocumentInfo[]>('list_documents', { sessionToken, categoryId });
+  },
+
+  async listAllDocuments(sessionToken: string): Promise<DocumentInfo[]> {
+    assertTauri();
+    return invoke<DocumentInfo[]>('list_all_documents', { sessionToken });
+  },
+
+  async importDocument(
+    sessionToken: string,
+    sourcePath: string,
+    categoryId: number | null,
+    title: string | null
+  ): Promise<DocumentInfo> {
+    assertTauri();
+    return invoke<DocumentInfo>('import_document', { sessionToken, sourcePath, categoryId, title });
+  },
+
+  async updateDocument(
+    sessionToken: string,
+    documentId: number,
+    title: string,
+    categoryId: number | null,
+    notes: string | null
+  ): Promise<DocumentInfo> {
+    assertTauri();
+    return invoke<DocumentInfo>('update_document', { sessionToken, documentId, title, categoryId, notes });
+  },
+
+  async deleteDocument(sessionToken: string, documentId: number): Promise<void> {
+    assertTauri();
+    await invoke('delete_document', { sessionToken, documentId });
+  },
+
+  async readDocumentBytes(sessionToken: string, documentId: number): Promise<number[]> {
+    assertTauri();
+    return invoke<number[]>('read_document_bytes', { sessionToken, documentId });
+  },
+
+  async revealDocument(sessionToken: string, documentId: number): Promise<void> {
+    assertTauri();
+    await invoke('reveal_document', { sessionToken, documentId });
+  },
+
+  async pickDocumentFile(): Promise<string | null> {
+    assertTauri();
+    const selection = await open({
+      directory: false,
+      multiple: false,
+      title: 'Выберите документ'
+    });
+    if (!selection) {
+      return null;
+    }
+    return Array.isArray(selection) ? selection[0] : selection;
   }
 };

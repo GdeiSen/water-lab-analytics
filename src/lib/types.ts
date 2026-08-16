@@ -1,5 +1,7 @@
 export type UserRole = 'viewer' | 'admin';
 
+export type AppMode = 'daily' | 'retro';
+
 export interface AuthToken {
   token: string;
   username: string;
@@ -44,6 +46,24 @@ export interface FileInfo {
   warnings: string[];
   objectCount: number;
   parsedAt: string;
+}
+
+/**
+ * Minimal shape the file browser (Sidebar/FileList/FileItem) actually
+ * needs — satisfied by both `FileInfo` (daily) and `RetroFileInfo` (retro)
+ * so those components render either mode's file list unchanged.
+ */
+export interface FileListEntry {
+  id: number;
+  filename: string;
+  status: 'ok' | 'warning' | 'error' | string;
+  /**
+   * Short human label to show instead of `filename` when available (retro
+   * mode only — one physical file can hold several sheets/sampling points,
+   * and their distinguishing part sits at the end of `filename`, which gets
+   * clipped in a narrow list). Falls back to `filename` when absent.
+   */
+  sourceLabel?: string;
 }
 
 export interface TechnologicalObject {
@@ -247,4 +267,68 @@ export interface FileChangedEvent {
 export interface FileErrorEvent {
   filename: string;
   error: string;
+}
+
+// --- Retrospective data mode -------------------------------------------------
+
+export interface RetroFileInfo {
+  id: number;
+  filename: string;
+  title: string;
+  status: 'ok' | 'warning' | 'error' | string;
+  warnings: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  parsedAt: string;
+  /** Short human label for what this sheet represents, e.g. "Вход ОС" or "Секция 3". */
+  sourceLabel: string;
+}
+
+export interface RetroFact {
+  label: string;
+  value: number | null;
+  rawValue: string;
+}
+
+export interface RetroFileDetails {
+  id: number;
+  filename: string;
+  title: string;
+  status: string;
+  warnings: string[];
+  facts: RetroFact[];
+}
+
+/**
+ * A named date range used to overlay several time slices of the same
+ * parameter on one chart (e.g. "2023" vs "2024" vs "Q1 2023"), each rendered
+ * as its own pseudo-object so the existing per-object chart/legend/color
+ * machinery renders it without changes.
+ */
+export interface OverlayPeriod {
+  id: string;
+  label: string;
+  from: string;
+  to: string;
+  color?: string;
+}
+
+// --- Document container (methodologies, report forms, standards) -----------
+
+export interface DocumentCategory {
+  id: number;
+  name: string;
+  orderIndex: number;
+}
+
+export interface DocumentInfo {
+  id: number;
+  categoryId: number | null;
+  title: string;
+  originalName: string;
+  extension: string;
+  sizeBytes: number;
+  notes: string | null;
+  addedAt: string;
+  orderIndex: number;
 }

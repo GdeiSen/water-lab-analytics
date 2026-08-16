@@ -13,7 +13,7 @@ import type {
   ChartTrendlineSettings,
   ParameterLink
 } from '@/lib/types';
-import { formatDate, formatNumber } from '@/lib/utils';
+import { formatDate, formatNumber, formatNumberForCopy } from '@/lib/utils';
 import { TANK_COLORS } from '@/lib/utils';
 
 interface StatsSummaryProps {
@@ -26,6 +26,33 @@ interface StatsSummaryProps {
   trendlineReports: ChartTrendlineReport[];
   trendlineSettings: ChartTrendlineSettings;
   onExportExcel: () => void;
+  /**
+   * Overrides how a point's `date` is displayed in the data table and date
+   * search. Defaults to `formatDate` (calendar date). Period-overlay mode
+   * passes a formatter for ordinal phase positions — see
+   * src/lib/period-overlay.ts.
+   */
+  dateFormatter?: (value: string) => string;
+  /**
+   * When set, efficiency (input→output %) for a linked parameter pair is
+   * computed once per group instead of once across all selected objects.
+   * Period-overlay mode passes one group per period — averaging efficiency
+   * across, say, 2023 and 2025 in a single number would be meaningless.
+   */
+  efficiencyGroups?: EfficiencyGroup[];
+}
+
+export interface EfficiencyGroup {
+  key: string;
+  label: string;
+  objectKeys: string[];
+}
+
+interface EfficiencyRow {
+  key: string;
+  label: string;
+  average: number | null;
+  cursor: number | null;
 }
 
 interface TableColumn {
@@ -68,8 +95,11 @@ export function StatsSummary({
   guideMode,
   trendlineReports,
   trendlineSettings,
-  onExportExcel
+  onExportExcel,
+  dateFormatter,
+  efficiencyGroups
 }: StatsSummaryProps) {
+  const formatRowDate = dateFormatter ?? formatDate;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
@@ -156,10 +186,10 @@ export function StatsSummary({
 
     return tableRows.filter((row) => {
       const iso = row.date.toLowerCase();
-      const display = formatDate(row.date).toLowerCase();
+      const display = formatRowDate(row.date).toLowerCase();
       return iso.includes(query) || display.includes(query);
     });
-  }, [dateQuery, tableRows]);
+  }, [dateQuery, formatRowDate, tableRows]);
 
   const sortedRows = useMemo(() => {
     const rows = [...filteredRows];
@@ -242,9 +272,19 @@ export function StatsSummary({
         selectedObjectKeys,
         guideMode,
         data,
-        hoverSnapshot
+        hoverSnapshot,
+        efficiencyGroups
       ),
-    [data, guideMode, hoverSnapshot, parameterLinks, selectedObjectKeys, selectedTestIds, statsEntries]
+    [
+      data,
+      efficiencyGroups,
+      guideMode,
+      hoverSnapshot,
+      parameterLinks,
+      selectedObjectKeys,
+      selectedTestIds,
+      statsEntries
+    ]
   );
 
   const toggleSort = (key: 'date' | string) => {
@@ -317,11 +357,7 @@ export function StatsSummary({
                       />
                     ))}
                   </div>
-                  <GroupedMetricRows
-                    pearsonEntries={groupPearson}
-                    efficiencyAverage={group.averageEfficiency}
-                    efficiencyCursor={group.cursorEfficiency}
-                  />
+                  <GroupedMetricRows pearsonEntries={groupPearson} efficiencyRows={group.efficiencyRows} />
                 </div>
               </div>
             );
@@ -457,7 +493,7 @@ export function StatsSummary({
                             onClick={() => toggleSort(columnKey)}
                             className="flex w-full items-center justify-between gap-1"
                           >
-                            <span className="truncate">{object.objectLabel}</span>
+                            <span className="truncate">{object.objectLabel.trim() || 'Значение'}</span>
                             <span className="text-[11px] text-ink/60">{getSortMark(columnKey)}</span>
                           </button>
                         </th>
@@ -476,7 +512,7 @@ export function StatsSummary({
                           isActive ? 'bg-[#ffe8a3]' : 'bg-white'
                         }`}
                       >
-                        {formatDate(row.date)}
+                        {formatRowDate(row.date)}
                       </td>
                       {tableColumns.map((column) => (
                         <td
@@ -525,6 +561,7 @@ function StatsCard({
   };
 
   const hoverValueLabel = formatNumber(hoverValue);
+  const hoverValueCopyLabel = formatNumberForCopy(hoverValue);
   const canCopyHoverValue = hoverValueLabel !== '\u2014';
 
   return (
@@ -538,7 +575,7 @@ function StatsCard({
           disabled={!canCopyHoverValue}
           onClick={() => {
             if (canCopyHoverValue) {
-              void copyToClipboard(hoverValueLabel, 'Значение скопировано');
+              void copyToClipboard(hoverValueCopyLabel, 'Значение скопировано');
             }
           }}
           className="shrink-0 border bg-white px-2 py-0.5 text-xs font-semibold transition enabled:cursor-copy enabled:hover:bg-ink/5 disabled:cursor-default"
@@ -552,10 +589,18 @@ function StatsCard({
         </button>
       </div>
       <div className="grid grid-cols-4 gap-1">
-        <Stat title="Min" value={formatNumber(entry.stats.min)} />
-        <Stat title="Max" value={formatNumber(entry.stats.max)} />
-        <Stat title={'\u0421\u0440\u0435\u0434\u043d\u0435\u0435'} value={formatNumber(entry.stats.average)} />
-        <Stat title={'\u041c\u0435\u0434\u0438\u0430\u043d\u0430'} value={formatNumber(entry.stats.median)} />
+        <Stat title="Min" value={formatNumber(entry.stats.min)} copyValue={formatNumberForCopy(entry.stats.min)} />
+        <Stat title="Max" value={formatNumber(entry.stats.max)} copyValue={formatNumberForCopy(entry.stats.max)} />
+        <Stat
+          title={'\u0421\u0440\u0435\u0434\u043d\u0435\u0435'}
+          value={formatNumber(entry.stats.average)}
+          copyValue={formatNumberForCopy(entry.stats.average)}
+        />
+        <Stat
+          title={'\u041c\u0435\u0434\u0438\u0430\u043d\u0430'}
+          value={formatNumber(entry.stats.median)}
+          copyValue={formatNumberForCopy(entry.stats.median)}
+        />
       </div>
       {trendReport && !trendReport.warning && trendlineSettings.showEquation && trendReport.equation && (
         <div className="mt-2 border-t border-ink/10 pt-1.5">
@@ -586,10 +631,13 @@ function StatsCard({
 
 function Stat({
   title,
-  value
+  value,
+  copyValue
 }: {
   title: string;
   value: string;
+  /** Value placed on the clipboard when it differs from the on-screen text (e.g. comma decimal). */
+  copyValue?: string;
 }) {
   const canCopy = value !== '\u2014';
 
@@ -597,7 +645,7 @@ function Stat({
     if (!canCopy) {
       return;
     }
-    void copyToClipboard(value, 'Значение скопировано');
+    void copyToClipboard(copyValue ?? value, 'Значение скопировано');
   };
 
   return (
@@ -641,14 +689,12 @@ async function copyToClipboard(value: string, successMessage: string): Promise<b
 
 function GroupedMetricRows({
   pearsonEntries,
-  efficiencyAverage,
-  efficiencyCursor
+  efficiencyRows
 }: {
   pearsonEntries: PearsonCorrelationEntry[] | null;
-  efficiencyAverage?: number | null;
-  efficiencyCursor?: number | null;
+  efficiencyRows?: EfficiencyRow[];
 }) {
-  const hasEfficiency = efficiencyAverage !== undefined || efficiencyCursor !== undefined;
+  const hasEfficiency = Boolean(efficiencyRows && efficiencyRows.length > 0);
   const hasRows = (pearsonEntries && pearsonEntries.length > 0) || hasEfficiency;
 
   if (!hasRows) {
@@ -670,18 +716,20 @@ function GroupedMetricRows({
           </span>
         </div>
       ))}
-      {hasEfficiency && (
-        <div className="grid gap-2 py-1.5 md:grid-cols-[160px_1fr_120px]">
-          <span className="font-semibold uppercase tracking-wide text-ink/55">Эффективность</span>
+      {efficiencyRows?.map((row) => (
+        <div key={`efficiency-${row.key}`} className="grid gap-2 py-1.5 md:grid-cols-[160px_1fr_120px]">
+          <span className="font-semibold uppercase tracking-wide text-ink/55">
+            Эффективность{row.label ? ` · ${row.label}` : ''}
+          </span>
           <span className="min-w-0 truncate text-ink/70">
-            Средняя: <span className="font-semibold">{formatPercent(efficiencyAverage ?? null)}</span>
-            <span className="font-semibold">, {formatPercent(efficiencyCursor ?? null)}</span>
+            Средняя: <span className="font-semibold">{formatPercent(row.average)}</span>
+            <span className="font-semibold">, {formatPercent(row.cursor)}</span>
           </span>
           <span className="font-mono font-semibold text-right" style={{ color: '#0b7a75' }}>
-            {formatPercent(efficiencyAverage ?? null)}
+            {formatPercent(row.average)}
           </span>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -706,8 +754,7 @@ type StatGroup =
       kind: 'linked';
       link: ParameterLink;
       entries: ChartTestStats[];
-      averageEfficiency: number | null;
-      cursorEfficiency: number | null;
+      efficiencyRows: EfficiencyRow[];
     }
   | {
       kind: 'paired';
@@ -737,6 +784,17 @@ function buildPearsonCorrelationEntries(
       return [left, right] as const;
     })
     .filter(isNumericPair);
+
+  // Retrospective mode has exactly one, unnamed object (see
+  // `RETRO_OBJECT_KEY`): the average *is* that object's series, so emit one
+  // unlabelled row instead of an "average" row plus a nameless duplicate.
+  // Daily mode is untouched, even when a single tank is selected.
+  const isSingleUnnamedObject =
+    visibleObjects.length === 1 && !visibleObjects[0].objectLabel.trim();
+  if (isSingleUnnamedObject) {
+    entries.push({ key: 'average', label: '', ...calculatePearsonCorrelation(averagePairs) });
+    return entries;
+  }
 
   entries.push({
     key: 'average',
@@ -821,12 +879,23 @@ function buildStatGroups(
   selectedObjectKeys: string[],
   guideMode: ChartGuideMode,
   data: ChartDataset | null,
-  hoverSnapshot: ChartHoverSnapshot | null
+  hoverSnapshot: ChartHoverSnapshot | null,
+  efficiencyGroups?: EfficiencyGroup[]
 ): StatGroup[] {
   const entryById = new Map(entries.map((entry) => [entry.testId, entry]));
   const selected = new Set(selectedTestIds);
   const used = new Set<number>();
   const groups: StatGroup[] = [];
+
+  // Averaging efficiency across every selected object is only meaningful
+  // when those objects share one time axis. Under period overlay the
+  // "objects" are really (object × period) pairs, so efficiency is
+  // computed once per group (period) instead of once across all of them —
+  // otherwise e.g. 2023 would get averaged against 2025.
+  const resolvedEfficiencyGroups: EfficiencyGroup[] =
+    efficiencyGroups && efficiencyGroups.length > 0
+      ? efficiencyGroups
+      : [{ key: 'all', label: '', objectKeys: selectedObjectKeys }];
 
   for (const link of parameterLinks) {
     if (!selected.has(link.inputTestId) || !selected.has(link.outputTestId)) {
@@ -839,12 +908,18 @@ function buildStatGroups(
       continue;
     }
 
+    const efficiencyRows: EfficiencyRow[] = resolvedEfficiencyGroups.map((group) => ({
+      key: group.key,
+      label: group.label,
+      average: calculateAverageEfficiency(data, link, group.objectKeys, guideMode),
+      cursor: calculateCursorEfficiency(data, hoverSnapshot, link, group.objectKeys, guideMode)
+    }));
+
     groups.push({
       kind: 'linked',
       link,
       entries: [input, output],
-      averageEfficiency: calculateAverageEfficiency(data, link, selectedObjectKeys, guideMode),
-      cursorEfficiency: calculateCursorEfficiency(data, hoverSnapshot, link, selectedObjectKeys, guideMode)
+      efficiencyRows
     });
     used.add(input.testId);
     used.add(output.testId);

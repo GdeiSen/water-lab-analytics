@@ -23,9 +23,17 @@ interface RightSidebarProps {
   parameterLinks: ParameterLink[];
   pendingLinkTestId?: number | null;
   onToggleParameterLink?: (testId: number) => void;
-  availableObjects: TechnologicalObject[];
-  selectedObjectKeys: string[];
-  onChangeObjects: (keys: string[]) => void;
+  /** Parameters listed under their own heading — see `TestTypeSelect`. */
+  secondaryTestIds?: number[];
+  secondaryTestsLabel?: string;
+  /**
+   * Omitted in retrospective mode: a retro sheet is one sampling point, so
+   * there is nothing to pick — leaving these out hides the whole
+   * "Технологические объекты" section.
+   */
+  availableObjects?: TechnologicalObject[];
+  selectedObjectKeys?: string[];
+  onChangeObjects?: (keys: string[]) => void;
   guideMode: ChartGuideMode;
   onGuideModeChange: (mode: ChartGuideMode) => void;
   optimization: ChartOptimizationSettings;
@@ -42,8 +50,10 @@ export function RightSidebar({
   parameterLinks,
   pendingLinkTestId = null,
   onToggleParameterLink,
+  secondaryTestIds,
+  secondaryTestsLabel,
   availableObjects,
-  selectedObjectKeys,
+  selectedObjectKeys = [],
   onChangeObjects,
   guideMode,
   onGuideModeChange,
@@ -118,6 +128,8 @@ export function RightSidebar({
                   parameterLinks={parameterLinks}
                   pendingLinkTestId={pendingLinkTestId}
                   onToggleParameterLink={onToggleParameterLink}
+                  secondaryTestIds={secondaryTestIds}
+                  secondaryLabel={secondaryTestsLabel}
                 />
               </div>
             </>
@@ -155,6 +167,7 @@ export function RightSidebar({
           )}
         </section>
 
+        {onChangeObjects && availableObjects && (
         <section className="min-w-0 space-y-2 border border-ink/15 p-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink/70">
@@ -186,6 +199,7 @@ export function RightSidebar({
             </>
           )}
         </section>
+        )}
 
         <section className="min-w-0 space-y-2 border border-ink/15 p-2">
           <div className="flex items-center justify-between gap-2">

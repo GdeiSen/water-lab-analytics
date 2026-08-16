@@ -10,38 +10,46 @@ permissions:
   contents: write
 
 jobs:
-  publish-tauri:
+  publish-portable:
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            target: aarch64-apple-darwin
+            label: macos-arm64
             edition: licensed
           - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            target: x86_64-apple-darwin
+            label: macos-x64
             edition: licensed
           - platform: ubuntu-22.04
-            args: ""
+            target: ""
+            label: linux-x64
             edition: licensed
           - platform: windows-latest
-            args: ""
+            target: ""
+            label: windows-x64
             edition: licensed
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            target: aarch64-apple-darwin
+            label: macos-arm64
             edition: community
           - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            target: x86_64-apple-darwin
+            label: macos-x64
             edition: community
           - platform: ubuntu-22.04
-            args: ""
+            target: ""
+            label: linux-x64
             edition: community
           - platform: windows-latest
-            args: ""
+            target: ""
+            label: windows-x64
             edition: community
 
     runs-on: ${{ matrix.platform }}
-    name: Build ${{ matrix.edition }} on ${{ matrix.platform }} ${{ matrix.args }}
+    name: Build ${{ matrix.edition }} portable on ${{ matrix.label }}
 
     steps:
       - name: Checkout
@@ -56,7 +64,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -80,17 +88,49 @@ jobs:
           fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
           NODE
 
-      - name: Build and publish Tauri app
-        uses: tauri-apps/tauri-action@v0.6.2
+      - name: Build portable executable
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WLA_LICENSE_REQUIRED: ${{ matrix.edition == 'community' && '0' || '1' }}
           WLA_LICENSE_PUBLIC_KEY: ${{ secrets.WLA_LICENSE_PUBLIC_KEY }}
           WLA_LICENSE_API_URL: ${{ secrets.WLA_LICENSE_API_URL }}
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            npx tauri build --bundles none --target ${{ matrix.target }}
+          else
+            npx tauri build --bundles none
+          fi
+
+      - name: Collect portable binary
+        id: bin
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+
+          if [ -n "${{ matrix.target }}" ]; then
+            SRC="src-tauri/target/${{ matrix.target }}/release/water-lab-analytics${EXT}"
+          else
+            SRC="src-tauri/target/release/water-lab-analytics${EXT}"
+          fi
+
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          DEST="dist/water-lab-analytics-${VERSION}-${{ matrix.edition }}-${{ matrix.label }}${EXT}"
+
+          mkdir -p dist
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Water Lab Analytics ${{ github.ref_name }}
-          releaseBody: Licensed and community release artifacts for Water Lab Analytics.
-          releaseDraft: true
+          tag_name: ${{ github.ref_name }}
+          name: Water Lab Analytics ${{ github.ref_name }}
+          body: Portable executables for Water Lab Analytics (licensed and community editions, no installer).
+          draft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          files: ${{ steps.bin.outputs.path }}

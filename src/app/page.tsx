@@ -16,31 +16,35 @@ import { toast } from "sonner";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { LicenseActivationScreen } from "@/components/license/LicenseActivationScreen";
+import { FileDetails } from "@/components/files/FileDetails";
+import { RetroFileDetailsPanel } from "@/components/files/RetroFileDetailsPanel";
 import { MainArea } from "@/components/layout/MainArea";
 import { InterfaceSettingsMenu } from "@/components/layout/InterfaceSettingsMenu";
+import { ModeSwitcher } from "@/components/layout/ModeSwitcher";
 import { RightSidebar } from "@/components/layout/RightSidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArchive } from "@/hooks/useArchive";
 import { useAuth } from "@/hooks/useAuth";
+import { useAvailableObjects, useAvailableDates } from "@/hooks/useAvailableObjects";
+import { useEffectiveSelection } from "@/hooks/useEffectiveSelection";
 import { useChartData } from "@/hooks/useChartData";
+import { useParameterLinks } from "@/hooks/useParameterLinks";
+import { useRetroArchive } from "@/hooks/useRetroArchive";
+import { useRetroChartData } from "@/hooks/useRetroChartData";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { AUTH_BYPASS_ENABLED } from "@/lib/app-config";
-import { buildParameterLinks } from "@/lib/parameter-links";
+import { buildExportDefaultName, dataUrlToBytes, exportChartExcel } from "@/lib/chart-export";
+import {
+  buildPeriodEfficiencyGroups,
+  buildPeriodOverlayDataset,
+  formatPhaseLabel,
+} from "@/lib/period-overlay";
 import { api, isTauriRuntime, pickExportPath } from "@/lib/tauri-api";
-import type {
-  ChartDataset,
-  ChartObject,
-  ChartTest,
-  ChartGuideMode,
-  ExcelCellValue,
-  ExcelExportPayload,
-  LicenseStatus,
-  ParameterLink,
-  TestType,
-} from "@/lib/types";
+import type { AppMode, ChartGuideMode, LicenseStatus } from "@/lib/types";
 import { useDataStore } from "@/stores/data-store";
+import { useRetroDataStore } from "@/stores/retro-data-store";
 
 const MIN_SIDEBAR_WIDTH = 240;
 const MAX_SIDEBAR_WIDTH = 520;
@@ -69,17 +73,16 @@ export default function Page() {
   const resizeGuideRef = useRef<HTMLDivElement | null>(null);
   const pendingResizeRef = useRef<SidebarResizeDraft | null>(null);
   const restoreAttemptRef = useRef<string | null>(null);
+  const retroRestoreAttemptRef = useRef<string | null>(null);
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [activeMode, setActiveMode] = useState<AppMode>("daily");
   const [guideMode, setGuideMode] = useState<ChartGuideMode>("series");
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(true);
   const [licenseError, setLicenseError] = useState<string | null>(null);
-  const [manualParameterLinks, setManualParameterLinks] = useState<ParameterLink[]>([]);
-  const [disabledAutoParameterLinkIds, setDisabledAutoParameterLinkIds] = useState<string[]>([]);
-  const [pendingLinkTestId, setPendingLinkTestId] = useState<number | null>(null);
   const [sidebarResize, setSidebarResize] = useState<SidebarResizeState | null>(
     null,
   );
@@ -116,6 +119,38 @@ export default function Page() {
   const { selectArchive, openArchiveByPath, loadFileDetails, rescan } =
     useArchive();
   useChartData();
+
+  const {
+    files: retroFiles,
+    selectedFileId: retroSelectedFileId,
+    fileDetails: retroFileDetails,
+    testTypes: retroTestTypes,
+    allTestTypes: retroAllTestTypes,
+    selectedTestIds: retroSelectedTestIds,
+    dateRange: retroDateRange,
+    chartData: retroChartData,
+    isChartLoading: retroIsChartLoading,
+    parseProgress: retroParseProgress,
+    searchQuery: retroSearchQuery,
+    statusMessage: retroStatusMessage,
+    periods: retroPeriods,
+    overlayEnabled: retroOverlayEnabled,
+    setSelectedTestIds: setRetroSelectedTestIds,
+    setDateRange: setRetroDateRange,
+    setSearchQuery: setRetroSearchQuery,
+    setParseProgress: setRetroParseProgress,
+    setStatusMessage: setRetroStatusMessage,
+    setArchiveSummary: setRetroArchiveSummary,
+    setFiles: setRetroFiles,
+    setTestTypes: setRetroTestTypes,
+    setAllTestTypes: setRetroAllTestTypes,
+    setPeriods: setRetroPeriods,
+    setOverlayEnabled: setRetroOverlayEnabled,
+  } = useRetroDataStore();
+
+  const { selectRetroArchive, openRetroArchiveByPath, loadRetroFileDetails, rescanRetroArchive } =
+    useRetroArchive();
+  useRetroChartData();
 
   useTauriEvent(
     api.onParseProgress,
@@ -159,6 +194,59 @@ export default function Page() {
         setStatusMessage(`Файл ${payload.action}: ${payload.filename}`);
       },
       [setStatusMessage],
+    ),
+  );
+
+  useTauriEvent(
+    api.onRetroParseProgress,
+    useCallback((payload) => setRetroParseProgress(payload), [setRetroParseProgress]),
+  );
+  useTauriEvent(
+    api.onRetroParseComplete,
+    useCallback(
+      async (payload) => {
+        setRetroArchiveSummary(payload);
+        if (!session) {
+          return;
+        }
+
+        const [nextFiles, allTests] = await Promise.all([
+          api.getRetroFileList(session.token, payload.archiveId),
+          api.getRetroTestTypes(session.token, payload.archiveId),
+        ]);
+
+        setRetroFiles(nextFiles);
+        setRetroAllTestTypes(allTests);
+
+        // The sidebar lists one sheet's parameters, so a background rescan
+        // reloads the parameters of the sheet that is open (or the first
+        // one) rather than dumping the whole archive into the list.
+        const targetFileId =
+          useRetroDataStore.getState().selectedFileId ?? nextFiles[0]?.id ?? null;
+        if (targetFileId === null) {
+          setRetroTestTypes([]);
+          setRetroSelectedTestIds([]);
+          return;
+        }
+
+        const fileTests = await api.getRetroTestTypes(session.token, undefined, targetFileId);
+        setRetroTestTypes(fileTests);
+        const stillValid = new Set(allTests.map((test) => test.id));
+        const preserved = useRetroDataStore
+          .getState()
+          .selectedTestIds.filter((id) => stillValid.has(id));
+        setRetroSelectedTestIds(
+          preserved.length > 0 ? preserved : fileTests[0] ? [fileTests[0].id] : [],
+        );
+      },
+      [
+        session,
+        setRetroAllTestTypes,
+        setRetroArchiveSummary,
+        setRetroFiles,
+        setRetroSelectedTestIds,
+        setRetroTestTypes,
+      ],
     ),
   );
 
@@ -207,144 +295,93 @@ export default function Page() {
     }, []),
   );
 
-  const availableObjects = useMemo(() => {
-    if (fileDetails?.objects && fileDetails.objects.length > 0) {
-      return fileDetails.objects;
-    }
-    if (chartData?.objects && chartData.objects.length > 0) {
-      return chartData.objects.map((item) => ({
-        key: item.objectKey,
-        label: item.objectLabel,
-        order: item.objectOrder,
-        active: item.objectActive,
-      }));
-    }
-
-    const maxObjectCount = files.reduce(
-      (max, file) => Math.max(max, file.objectCount),
-      0,
-    );
-    return Array.from({ length: maxObjectCount }, (_, index) => ({
-      key: String(index + 1),
-      label: String(index + 1),
-      order: index + 1,
-      active: true,
-    }));
-  }, [chartData?.objects, fileDetails?.objects, files]);
-
-  const availableDates = useMemo(() => {
-    const unique = new Set(files.map((file) => file.date));
-    return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [files]);
-
-  const visibleTestTypes = useMemo(
-    () => filterDuplicateScopedTestTypes(testTypes),
-    [testTypes],
-  );
-
-  const autoParameterLinks = useMemo(
-    () => buildParameterLinks(visibleTestTypes),
-    [visibleTestTypes],
-  );
-  const parameterLinks = useMemo(() => {
-    const disabled = new Set(disabledAutoParameterLinkIds);
-    const effectiveAuto = autoParameterLinks.filter((link) => !disabled.has(link.id));
-    const usedIds = new Set(effectiveAuto.map((link) => link.id));
-    const effectiveManual = manualParameterLinks.filter((link) => !usedIds.has(link.id));
-    return [...effectiveAuto, ...effectiveManual];
-  }, [autoParameterLinks, disabledAutoParameterLinkIds, manualParameterLinks]);
-
   useEffect(() => {
-    const availableIds = new Set(visibleTestTypes.map((test) => test.id));
-    setManualParameterLinks((links) =>
-      links.filter(
-        (link) => availableIds.has(link.inputTestId) && availableIds.has(link.outputTestId),
-      ),
-    );
-    setDisabledAutoParameterLinkIds((ids) =>
-      ids.filter((id) => autoParameterLinks.some((link) => link.id === id)),
-    );
-    setPendingLinkTestId((id) => (id && availableIds.has(id) ? id : null));
-  }, [autoParameterLinks, visibleTestTypes]);
+    if (!session) {
+      retroRestoreAttemptRef.current = null;
+      return;
+    }
 
-  const handleToggleParameterLink = useCallback(
-    (testId: number) => {
-      const selected = new Set(selectedTestIds);
-      const activeLinks = parameterLinks.filter(
-        (link) =>
-          selected.has(link.inputTestId) &&
-          selected.has(link.outputTestId) &&
-          (link.inputTestId === testId || link.outputTestId === testId),
-      );
+    if (retroRestoreAttemptRef.current === session.token) {
+      return;
+    }
+    retroRestoreAttemptRef.current = session.token;
 
-      if (activeLinks.length > 0) {
-        const autoLinks = activeLinks.filter((link) => link.source === "auto");
-        const manualLinks = activeLinks.filter((link) => link.source === "manual");
-
-        if (autoLinks.length > 0) {
-          setDisabledAutoParameterLinkIds((ids) =>
-            Array.from(new Set([...ids, ...autoLinks.map((link) => link.id)])),
-          );
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const path = await api.getLastRetroArchivePath(session.token);
+        if (!path || cancelled) {
+          return;
         }
-        if (manualLinks.length > 0) {
-          const removedIds = new Set(manualLinks.map((link) => link.id));
-          setManualParameterLinks((links) => links.filter((link) => !removedIds.has(link.id)));
+        await openRetroArchiveByPath(path, { silent: true });
+        if (!cancelled) {
+          setRetroStatusMessage(`Восстановлен ретроспективный архив: ${path}`);
         }
-        setPendingLinkTestId(null);
-        return;
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Не удалось восстановить последний ретроспективный архив";
+          setRetroStatusMessage(message);
+        }
       }
+    };
 
-      if (pendingLinkTestId === null) {
-        setPendingLinkTestId(testId);
-        return;
-      }
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [openRetroArchiveByPath, session, setRetroStatusMessage]);
 
-      if (pendingLinkTestId === testId) {
-        setPendingLinkTestId(null);
-        return;
-      }
+  const availableObjects = useAvailableObjects(fileDetails?.objects, chartData?.objects, files);
+  const availableDates = useAvailableDates(files.map((file) => file.date));
 
-      const input = testTypes.find((test) => test.id === pendingLinkTestId);
-      const output = testTypes.find((test) => test.id === testId);
-      if (!input || !output) {
-        setPendingLinkTestId(null);
-        return;
-      }
-
-      const autoLink = autoParameterLinks.find((link) =>
-        isSameParameterPair(link.inputTestId, link.outputTestId, input.id, output.id),
-      );
-      if (autoLink) {
-        setDisabledAutoParameterLinkIds((ids) => ids.filter((id) => id !== autoLink.id));
-      } else {
-        const [firstId, secondId] = [input.id, output.id].sort((left, right) => left - right);
-        const nextLink: ParameterLink = {
-          id: `manual-${firstId}-${secondId}`,
-          label: buildManualParameterLinkLabel(input.displayName, output.displayName),
-          inputTestId: input.id,
-          inputTestName: input.displayName,
-          outputTestId: output.id,
-          outputTestName: output.displayName,
-          source: "manual",
-        };
-        setManualParameterLinks((links) => [
-          ...links.filter((link) => link.id !== nextLink.id),
-          nextLink,
-        ]);
-      }
-
-      setSelectedTestIds(Array.from(new Set([...selectedTestIds, input.id, output.id])));
-      setPendingLinkTestId(null);
-    },
-    [
-      autoParameterLinks,
-      parameterLinks,
-      pendingLinkTestId,
-      selectedTestIds,
-      setSelectedTestIds,
-      testTypes,
-    ],
+  // Retro mode has no object dimension — the chart's single synthetic
+  // object (see `RETRO_OBJECT_KEY`) is whatever the query came back with,
+  // and every series belongs to it.
+  const retroObjectKeys = useMemo(
+    () => retroChartData?.objects.map((object) => object.objectKey) ?? [],
+    [retroChartData],
   );
+  // Retro archives have no single per-file calendar date; period presets
+  // are derived from whatever data the currently selected test(s) cover.
+  const retroAvailableDates = useAvailableDates(retroChartData?.points.map((point) => point.date) ?? []);
+
+  const {
+    visibleTestTypes,
+    parameterLinks,
+    pendingLinkTestId,
+    handleToggleParameterLink,
+  } = useParameterLinks(testTypes, selectedTestIds, setSelectedTestIds);
+
+  // The sidebar lists the selected sheet's parameters, plus — under their
+  // own heading — parameters still selected from another sheet, so they can
+  // be seen and unchecked (an inlet/outlet comparison always spans two
+  // sheets, since one sheet is one sampling point).
+  const retroForeignSelectedTests = useMemo(() => {
+    const own = new Set(retroTestTypes.map((test) => test.id));
+    return retroAllTestTypes.filter(
+      (test) => !own.has(test.id) && retroSelectedTestIds.includes(test.id),
+    );
+  }, [retroAllTestTypes, retroSelectedTestIds, retroTestTypes]);
+
+  const retroSidebarTestTypes = useMemo(
+    () => [...retroTestTypes, ...retroForeignSelectedTests],
+    [retroForeignSelectedTests, retroTestTypes],
+  );
+
+  const retroForeignSelectedTestIds = useMemo(
+    () => retroForeignSelectedTests.map((test) => test.id),
+    [retroForeignSelectedTests],
+  );
+
+  const {
+    visibleTestTypes: retroVisibleTestTypes,
+    parameterLinks: retroParameterLinks,
+    pendingLinkTestId: retroPendingLinkTestId,
+    handleToggleParameterLink: handleToggleRetroParameterLink,
+  } = useParameterLinks(retroSidebarTestTypes, retroSelectedTestIds, setRetroSelectedTestIds);
 
   const refreshLicenseStatus = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -414,30 +451,19 @@ export default function Page() {
     [],
   );
 
-  const effectiveSelectedTestIds = useMemo(() => {
-    const available = new Set(visibleTestTypes.map((item) => item.id));
-    if (selectedTestIds.length === 0) {
-      return [];
-    }
-    const filtered = selectedTestIds.filter((id) => available.has(id));
-    if (filtered.length > 0) {
-      return filtered;
-    }
-    return visibleTestTypes[0] ? [visibleTestTypes[0].id] : [];
-  }, [selectedTestIds, visibleTestTypes]);
+  const { effectiveSelectedTestIds, effectiveSelectedObjectKeys } = useEffectiveSelection(
+    selectedTestIds,
+    visibleTestTypes,
+    setSelectedTestIds,
+    selectedObjectKeys,
+    availableObjects,
+  );
 
-  useEffect(() => {
-    const visibleIds = new Set(visibleTestTypes.map((test) => test.id));
-    const filtered = selectedTestIds.filter((id) => visibleIds.has(id));
-    if (filtered.length !== selectedTestIds.length) {
-      setSelectedTestIds(filtered);
-    }
-  }, [selectedTestIds, setSelectedTestIds, visibleTestTypes]);
-
-  const effectiveSelectedObjectKeys = useMemo(() => {
-    const available = new Set(availableObjects.map((item) => item.key));
-    return selectedObjectKeys.filter((key) => available.has(key));
-  }, [availableObjects, selectedObjectKeys]);
+  const { effectiveSelectedTestIds: retroEffectiveSelectedTestIds } = useEffectiveSelection(
+    retroSelectedTestIds,
+    retroVisibleTestTypes,
+    setRetroSelectedTestIds,
+  );
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {
@@ -454,53 +480,12 @@ export default function Page() {
   }, [chartTrendline.enabled, guideMode]);
 
   const handleExportExcel = useCallback(() => {
-    void (async () => {
-      if (!chartData) {
-        toast.error("Нет данных для экспорта");
-        return;
-      }
-
-      const payload = buildChartExcelPayload(
-        chartData,
-        effectiveSelectedTestIds,
-        effectiveSelectedObjectKeys,
-      );
-
-      try {
-        if (session && isTauriRuntime()) {
-          const fileName = buildExportDefaultName("chart_export", "xlsx");
-          const targetPath = await pickExportPath("Сохранить Excel", fileName, [
-            { name: "Excel", extensions: ["xlsx"] },
-          ]);
-          if (!targetPath) {
-            return;
-          }
-
-          await api.saveExcelExport(session.token, targetPath, payload);
-          toast.success("Excel экспортирован");
-          return;
-        }
-
-        const fileName = buildExportDefaultName("chart_export", "xls");
-        const blob = new Blob([buildBrowserExcelDocument(payload)], {
-          type: "application/vnd.ms-excel;charset=utf-8;",
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = fileName;
-        link.click();
-        URL.revokeObjectURL(url);
-        toast.success("Excel экспортирован");
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Не удалось экспортировать Excel";
-        toast.error(message);
-      }
-    })();
+    void exportChartExcel(session, chartData, effectiveSelectedTestIds, effectiveSelectedObjectKeys);
   }, [chartData, effectiveSelectedObjectKeys, effectiveSelectedTestIds, session]);
+
+  const handleExportRetroExcel = useCallback(() => {
+    void exportChartExcel(session, retroChartData, retroEffectiveSelectedTestIds, retroObjectKeys);
+  }, [retroChartData, retroEffectiveSelectedTestIds, retroObjectKeys, session]);
 
   const handleExportPng = useCallback(() => {
     void (async () => {
@@ -588,6 +573,38 @@ export default function Page() {
       toast.error(message);
     }
   }, []);
+
+  // Period overlay (see src/lib/period-overlay.ts): turns several time
+  // slices of the same parameter into pseudo-objects on one ChartDataset,
+  // so the chart/statistics/trendline machinery below renders it exactly
+  // like a normal multi-object query. Retro-only — a retro parameter has an
+  // archive-wide monthly grid that makes "2023 vs 2024" a meaningful
+  // comparison; daily mode has no equivalent notion of comparable slices
+  // (see the `PeriodControl` prop doc comments), so it never builds one.
+  const retroOverlay = useMemo(() => {
+    if (!retroOverlayEnabled || retroPeriods.length === 0 || !retroChartData) {
+      return null;
+    }
+    return buildPeriodOverlayDataset(retroChartData, retroPeriods);
+  }, [retroChartData, retroOverlayEnabled, retroPeriods]);
+
+  const retroPhaseFormatter = useCallback((value: string) => formatPhaseLabel(value, "month"), []);
+
+  const effectiveRetroChartData = retroOverlay?.dataset ?? retroChartData;
+
+  // When overlay is active, `effectiveRetroChartData` is keyed by
+  // pseudo-objects ("objectKey::periodId"), not the real selection — the
+  // chart/table must be told to look for those pseudo-keys, or every series
+  // comes up empty.
+  const retroChartSelectedObjectKeys = retroOverlay
+    ? retroOverlay.dataset.objects.map((object) => object.objectKey)
+    : retroObjectKeys;
+
+  const retroEfficiencyGroups = useMemo(
+    () =>
+      retroOverlay ? buildPeriodEfficiencyGroups(retroObjectKeys, retroPeriods) : undefined,
+    [retroOverlay, retroObjectKeys, retroPeriods],
+  );
 
   const moveResizeGuide = useCallback((x: number) => {
     const line = resizeGuideRef.current;
@@ -826,9 +843,12 @@ export default function Page() {
     <AuthProvider>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f1f3f5] p-3">
         <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border border-ink/20 bg-white px-4 py-3">
-          <div className="flex h-full items-center">
+          <div className="flex h-full flex-wrap items-center gap-3">
+            <ModeSwitcher mode={activeMode} onChange={setActiveMode} />
             <h1 className="text-lg font-semibold text-ink">
-              Модуль обработки параметров лабораторного контроля
+              {activeMode === "daily"
+                ? "Модуль обработки параметров лабораторного контроля"
+                : "Модуль ретроспективного анализа"}
             </h1>
           </div>
 
@@ -883,16 +903,30 @@ export default function Page() {
             }`}
             style={leftSidebarStyle}
           >
-            <Sidebar
-              files={files}
-              selectedFileId={selectedFileId}
-              selectedFileDetails={fileDetails}
-              searchQuery={searchQuery}
-              onSearchQuery={setSearchQuery}
-              onSelectFile={loadFileDetails}
-              onPickArchive={selectArchive}
-              onRescan={rescan}
-            />
+            {activeMode === "daily" ? (
+              <Sidebar
+                files={files}
+                selectedFileId={selectedFileId}
+                detailsSlot={<FileDetails details={fileDetails} />}
+                searchQuery={searchQuery}
+                onSearchQuery={setSearchQuery}
+                onSelectFile={loadFileDetails}
+                onPickArchive={selectArchive}
+                onRescan={rescan}
+              />
+            ) : (
+              <Sidebar
+                files={retroFiles}
+                selectedFileId={retroSelectedFileId}
+                detailsSlot={<RetroFileDetailsPanel details={retroFileDetails} />}
+                searchQuery={retroSearchQuery}
+                onSearchQuery={setRetroSearchQuery}
+                onSelectFile={loadRetroFileDetails}
+                onPickArchive={selectRetroArchive}
+                onRescan={rescanRetroArchive}
+                pickArchiveLabel="Выбрать ретро-архив"
+              />
+            )}
           </div>
 
           {!leftPanelCollapsed && (
@@ -905,25 +939,54 @@ export default function Page() {
             />
           )}
 
-          <MainArea
-            selectedTestIds={effectiveSelectedTestIds}
-            selectedObjectKeys={effectiveSelectedObjectKeys}
-            parameterLinks={parameterLinks}
-            availableDates={availableDates}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-            chartData={chartData}
-            isChartLoading={isChartLoading}
-            showAverage={showAverage}
-            guideMode={guideMode}
-            chartOptimization={chartOptimization}
-            chartTrendline={chartTrendline}
-            parseProgress={parseProgress}
-            statusMessage={statusMessage}
-            onExportExcel={handleExportExcel}
-            onExportPng={handleExportPng}
-            onPrintChart={handlePrintChart}
-          />
+          {activeMode === "daily" ? (
+            <MainArea
+              selectedTestIds={effectiveSelectedTestIds}
+              selectedObjectKeys={effectiveSelectedObjectKeys}
+              parameterLinks={parameterLinks}
+              availableDates={availableDates}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              chartData={chartData}
+              isChartLoading={isChartLoading}
+              showAverage={showAverage}
+              guideMode={guideMode}
+              chartOptimization={chartOptimization}
+              chartTrendline={chartTrendline}
+              parseProgress={parseProgress}
+              statusMessage={statusMessage}
+              onExportExcel={handleExportExcel}
+              onExportPng={handleExportPng}
+              onPrintChart={handlePrintChart}
+            />
+          ) : (
+            <MainArea
+              selectedTestIds={retroEffectiveSelectedTestIds}
+              selectedObjectKeys={retroChartSelectedObjectKeys}
+              parameterLinks={retroParameterLinks}
+              availableDates={retroAvailableDates}
+              dateRange={retroDateRange}
+              onDateRangeChange={setRetroDateRange}
+              periods={retroPeriods}
+              onPeriodsChange={setRetroPeriods}
+              overlayEnabled={retroOverlayEnabled}
+              onOverlayEnabledChange={setRetroOverlayEnabled}
+              chartData={effectiveRetroChartData}
+              isChartLoading={retroIsChartLoading}
+              showAverage={showAverage}
+              guideMode={guideMode}
+              chartOptimization={chartOptimization}
+              chartTrendline={chartTrendline}
+              parseProgress={retroParseProgress}
+              statusMessage={retroStatusMessage}
+              onExportExcel={handleExportRetroExcel}
+              onExportPng={handleExportPng}
+              onPrintChart={handlePrintChart}
+              xTickFormatter={retroOverlay ? retroPhaseFormatter : undefined}
+              dateFormatter={retroOverlay ? retroPhaseFormatter : undefined}
+              efficiencyGroups={retroEfficiencyGroups}
+            />
+          )}
 
           {!rightPanelCollapsed && (
             <div
@@ -943,24 +1006,44 @@ export default function Page() {
             }`}
             style={rightSidebarStyle}
           >
-            <RightSidebar
-              testTypes={visibleTestTypes}
-              selectedTestIds={effectiveSelectedTestIds}
-              onSelectTests={setSelectedTestIds}
-              parameterLinks={parameterLinks}
-              pendingLinkTestId={pendingLinkTestId}
-              onToggleParameterLink={handleToggleParameterLink}
-              availableObjects={availableObjects}
-              selectedObjectKeys={effectiveSelectedObjectKeys}
-              onChangeObjects={setSelectedObjectKeys}
-              guideMode={guideMode}
-              onGuideModeChange={setGuideMode}
-              optimization={chartOptimization}
-              trendline={chartTrendline}
-              pointCount={chartData?.points.length ?? 0}
-              onOptimizationChange={setChartOptimization}
-              onTrendlineChange={setChartTrendline}
-            />
+            {activeMode === "daily" ? (
+              <RightSidebar
+                testTypes={visibleTestTypes}
+                selectedTestIds={effectiveSelectedTestIds}
+                onSelectTests={setSelectedTestIds}
+                parameterLinks={parameterLinks}
+                pendingLinkTestId={pendingLinkTestId}
+                onToggleParameterLink={handleToggleParameterLink}
+                availableObjects={availableObjects}
+                selectedObjectKeys={effectiveSelectedObjectKeys}
+                onChangeObjects={setSelectedObjectKeys}
+                guideMode={guideMode}
+                onGuideModeChange={setGuideMode}
+                optimization={chartOptimization}
+                trendline={chartTrendline}
+                pointCount={chartData?.points.length ?? 0}
+                onOptimizationChange={setChartOptimization}
+                onTrendlineChange={setChartTrendline}
+              />
+            ) : (
+              <RightSidebar
+                testTypes={retroVisibleTestTypes}
+                selectedTestIds={retroEffectiveSelectedTestIds}
+                onSelectTests={setRetroSelectedTestIds}
+                parameterLinks={retroParameterLinks}
+                pendingLinkTestId={retroPendingLinkTestId}
+                onToggleParameterLink={handleToggleRetroParameterLink}
+                secondaryTestIds={retroForeignSelectedTestIds}
+                secondaryTestsLabel="Выбрано в других файлах"
+                guideMode={guideMode}
+                onGuideModeChange={setGuideMode}
+                optimization={chartOptimization}
+                trendline={chartTrendline}
+                pointCount={retroChartData?.points.length ?? 0}
+                onOptimizationChange={setChartOptimization}
+                onTrendlineChange={setChartTrendline}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1013,209 +1096,4 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function buildManualParameterLinkLabel(inputName: string, outputName: string): string {
-  const input = normalizeParameterLinkName(inputName);
-  const output = normalizeParameterLinkName(outputName);
-  if (input && output && input === output) {
-    return input;
-  }
-  return `${inputName} -> ${outputName}`;
-}
-
-function isSameParameterPair(
-  leftInputId: number,
-  leftOutputId: number,
-  rightInputId: number,
-  rightOutputId: number,
-): boolean {
-  return (
-    (leftInputId === rightInputId && leftOutputId === rightOutputId) ||
-    (leftInputId === rightOutputId && leftOutputId === rightInputId)
-  );
-}
-
-function normalizeParameterLinkName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/[.,;:]+/g, " ")
-    .replace(/\s+на\s+входе\s+/g, " ")
-    .replace(/\s+на\s+выходе\s+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildExportDefaultName(prefix: string, extension: string): string {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hour = String(now.getHours()).padStart(2, "0");
-  const minute = String(now.getMinutes()).padStart(2, "0");
-  const second = String(now.getSeconds()).padStart(2, "0");
-
-  return `${prefix}_${year}${month}${day}_${hour}${minute}${second}.${extension}`;
-}
-
-function dataUrlToBytes(dataUrl: string): Uint8Array {
-  const commaIndex = dataUrl.indexOf(",");
-  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
-}
-
-function buildChartExcelPayload(
-  chartData: ChartDataset,
-  selectedTestIds: number[],
-  selectedObjectKeys: string[],
-): ExcelExportPayload {
-  const tests =
-    selectedTestIds.length === 0
-      ? chartData.tests
-      : chartData.tests.filter((test) => selectedTestIds.includes(test.testId));
-  const objects =
-    selectedObjectKeys.length === 0
-      ? []
-      : chartData.objects.filter((object) =>
-          selectedObjectKeys.includes(object.objectKey),
-        );
-
-  const headerRows = buildExcelHeaderRows(tests, objects);
-
-  const rows = chartData.points.map((point) => {
-    const row: ExcelCellValue[] = [point.date];
-
-    for (const test of tests) {
-      for (const object of objects) {
-        const value =
-          point.values.find(
-            (item) =>
-              item.testId === test.testId && item.objectKey === object.objectKey,
-          )?.value ?? null;
-        row.push(value);
-      }
-    }
-
-    return row;
-  });
-
-  return {
-    worksheetName: "Параметры",
-    headerRows,
-    rows,
-  };
-}
-
-function filterDuplicateScopedTestTypes(testTypes: TestType[]): TestType[] {
-  const aerotankBases = new Set(
-    testTypes
-      .filter((test) => isAerotankScopedTest(test.displayName))
-      .map((test) => scopeAgnosticTestName(test.displayName)),
-  );
-
-  return testTypes.filter((test) => {
-    if (!isSectionScopedTest(test.displayName)) {
-      return true;
-    }
-    return !aerotankBases.has(scopeAgnosticTestName(test.displayName));
-  });
-}
-
-function isAerotankScopedTest(value: string): boolean {
-  const normalized = value.toLocaleLowerCase("ru-RU");
-  return normalized.includes("аэротенк") && !normalized.includes("секции");
-}
-
-function isSectionScopedTest(value: string): boolean {
-  const normalized = value.toLocaleLowerCase("ru-RU");
-  return normalized.includes("секции") && !normalized.includes("аэротенк");
-}
-
-function scopeAgnosticTestName(value: string): string {
-  return value
-    .toLocaleLowerCase("ru-RU")
-    .replaceAll("аэротенка", "объекта")
-    .replaceAll("аэротенку", "объекта")
-    .replaceAll("аэротенк", "объекта")
-    .replaceAll("секции", "объекта")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildBrowserExcelDocument(payload: ExcelExportPayload): string {
-  const headerRows = payload.headerRows
-    .map(
-      (row) =>
-        `<tr>${row.cells
-          .map((cell) => `<th>${escapeHtml(String(cell))}</th>`)
-          .join("")}</tr>`,
-    )
-    .join("");
-  const bodyRows = payload.rows
-    .map(
-      (row) =>
-        `<tr>${row
-          .map((cell) => `<td>${escapeHtml(formatExcelCell(cell))}</td>`)
-          .join("")}</tr>`,
-    )
-    .join("");
-
-  return [
-    "<html>",
-    "<head>",
-    '<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />',
-    `<meta name="ProgId" content="Excel.Sheet" />`,
-    "</head>",
-    "<body>",
-    '<table border="1">',
-    `<thead>${headerRows}</thead>`,
-    `<tbody>${bodyRows}</tbody>`,
-    "</table>",
-    "</body>",
-    "</html>",
-  ].join("");
-}
-
-function formatExcelCell(value: ExcelCellValue): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  return String(value);
-}
-
-function buildExcelHeaderRows(
-  tests: ChartTest[],
-  objects: ChartObject[],
-): ExcelExportPayload["headerRows"] {
-  if (objects.length === 0) {
-    return [
-      {
-        cells: ["Дата", ...tests.map((test) => test.testName)],
-      },
-    ];
-  }
-
-  return [
-    {
-      cells: ["Дата", ...tests.flatMap((test) => objects.map(() => test.testName))],
-    },
-    {
-      cells: ["", ...tests.flatMap(() => objects.map((object) => object.objectLabel))],
-    },
-  ];
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 

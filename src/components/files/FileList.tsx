@@ -1,10 +1,10 @@
 'use client';
 
 import { FileItem } from '@/components/files/FileItem';
-import type { FileInfo } from '@/lib/types';
+import type { FileListEntry } from '@/lib/types';
 
 interface FileListProps {
-  files: FileInfo[];
+  files: FileListEntry[];
   selectedFileId: number | null;
   onSelect: (fileId: number) => void;
 }

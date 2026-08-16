@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { StatsSummary } from '@/components/charts/StatsSummary';
+import { StatsSummary, type EfficiencyGroup } from '@/components/charts/StatsSummary';
 import { TimeSeriesChart } from '@/components/charts/TimeSeriesChart';
-import { DateRangePicker } from '@/components/filters/DateRangePicker';
+import { PeriodControl } from '@/components/filters/PeriodControl';
 import { StatusBar } from '@/components/layout/StatusBar';
 import type {
   ChartDataset,
@@ -14,6 +14,7 @@ import type {
   ChartTrendlineReport,
   ChartTrendlineSettings,
   DateRange,
+  OverlayPeriod,
   ParameterLink,
   ParseProgress
 } from '@/lib/types';
@@ -25,6 +26,15 @@ interface MainAreaProps {
   availableDates: string[];
   dateRange: DateRange;
   onDateRangeChange: (range: DateRange) => void;
+  /**
+   * Period comparison lives in the same control as the date range — see
+   * `PeriodControl`. Omit all four to drop the mode switcher and offer only
+   * a single date range (daily mode does this).
+   */
+  periods?: OverlayPeriod[];
+  onPeriodsChange?: (periods: OverlayPeriod[]) => void;
+  overlayEnabled?: boolean;
+  onOverlayEnabledChange?: (enabled: boolean) => void;
   chartData: ChartDataset | null;
   isChartLoading: boolean;
   showAverage: boolean;
@@ -36,6 +46,12 @@ interface MainAreaProps {
   onExportExcel: () => void;
   onExportPng: () => void;
   onPrintChart: () => void;
+  /** Set when period overlay is active — see src/lib/period-overlay.ts. */
+  xTickFormatter?: (value: string) => string;
+  xMinTickGap?: number;
+  dateFormatter?: (value: string) => string;
+  efficiencyGroups?: EfficiencyGroup[];
+  extraActions?: ReactNode;
 }
 
 export function MainArea({
@@ -45,6 +61,10 @@ export function MainArea({
   availableDates,
   dateRange,
   onDateRangeChange,
+  periods,
+  onPeriodsChange,
+  overlayEnabled,
+  onOverlayEnabledChange,
   chartData,
   isChartLoading,
   showAverage,
@@ -55,7 +75,12 @@ export function MainArea({
   statusMessage,
   onExportExcel,
   onExportPng,
-  onPrintChart
+  onPrintChart,
+  xTickFormatter,
+  xMinTickGap,
+  dateFormatter,
+  efficiencyGroups,
+  extraActions
 }: MainAreaProps) {
   const rootRef = useRef<HTMLElement | null>(null);
   const previewLineRef = useRef<HTMLDivElement | null>(null);
@@ -168,6 +193,8 @@ export function MainArea({
             onTrendlinesChange={setTrendlineReports}
             onExportPng={onExportPng}
             onPrintChart={onPrintChart}
+            xTickFormatter={xTickFormatter}
+            xMinTickGap={xMinTickGap}
           />
 
           <div
@@ -180,7 +207,20 @@ export function MainArea({
           />
         </div>
 
-        <DateRangePicker value={dateRange} onChange={onDateRangeChange} availableDates={availableDates} />
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <PeriodControl
+              value={dateRange}
+              onChange={onDateRangeChange}
+              availableDates={availableDates}
+              periods={periods}
+              onPeriodsChange={onPeriodsChange}
+              overlayEnabled={overlayEnabled}
+              onOverlayEnabledChange={onOverlayEnabledChange}
+            />
+          </div>
+          {extraActions}
+        </div>
 
         <StatsSummary
           data={chartData}
@@ -192,6 +232,8 @@ export function MainArea({
           trendlineReports={trendlineReports}
           trendlineSettings={chartTrendline}
           onExportExcel={onExportExcel}
+          dateFormatter={dateFormatter}
+          efficiencyGroups={efficiencyGroups}
         />
       </div>
       <StatusBar progress={parseProgress} message={statusMessage} />

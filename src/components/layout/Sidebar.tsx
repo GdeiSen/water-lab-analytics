@@ -1,33 +1,35 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { AlertCircle, FolderOpen, RefreshCw } from 'lucide-react';
 
-import { FileDetails } from '@/components/files/FileDetails';
 import { FileList } from '@/components/files/FileList';
 import { Button } from '@/components/ui/Button';
-import type { FileDetails as FileDetailsType, FileInfo } from '@/lib/types';
+import type { FileListEntry } from '@/lib/types';
 
 interface SidebarProps {
-  files: FileInfo[];
+  files: FileListEntry[];
   selectedFileId: number | null;
-  selectedFileDetails: FileDetailsType | null;
+  /** Content shown below the file list — a mode-specific "details" panel (see FileDetails / RetroFileDetailsPanel). */
+  detailsSlot: ReactNode;
   searchQuery: string;
   onSearchQuery: (value: string) => void;
   onSelectFile: (fileId: number) => void;
   onPickArchive: () => Promise<void>;
   onRescan: () => Promise<void>;
+  pickArchiveLabel?: string;
 }
 
 export function Sidebar({
   files,
   selectedFileId,
-  selectedFileDetails,
+  detailsSlot,
   searchQuery,
   onSearchQuery,
   onSelectFile,
   onPickArchive,
-  onRescan
+  onRescan,
+  pickArchiveLabel = 'Выбрать архив'
 }: SidebarProps) {
   const counters = useMemo(() => {
     const acc = { total: files.length, ok: 0, warning: 0, error: 0 };
@@ -49,7 +51,7 @@ export function Sidebar({
       <div className="flex items-center gap-2">
         <Button className="flex-1" onClick={onPickArchive}>
           <FolderOpen className="mr-2 h-4 w-4" />
-          Выбрать архив
+          {pickArchiveLabel}
         </Button>
         <Button variant="secondary" onClick={onRescan} title="Пересканировать">
           <RefreshCw className="h-4 w-4" />
@@ -77,9 +79,7 @@ export function Sidebar({
         <FileList files={filtered} selectedFileId={selectedFileId} onSelect={onSelectFile} />
       </div>
 
-      <div className="shrink-0 overflow-auto xl:max-h-[34%]">
-        <FileDetails details={selectedFileDetails} />
-      </div>
+      <div className="shrink-0 overflow-auto xl:max-h-[34%]">{detailsSlot}</div>
     </aside>
   );
 }

@@ -13,6 +13,14 @@ interface TestTypeSelectProps {
   parameterLinks?: ParameterLink[];
   pendingLinkTestId?: number | null;
   onToggleParameterLink?: (testId: number) => void;
+  /**
+   * Ids that belong to a second, separately headed group at the bottom of
+   * the list. Retrospective mode uses it for parameters still selected from
+   * another sheet, so they can be seen and unchecked without leaving the
+   * sheet the user is on.
+   */
+  secondaryTestIds?: number[];
+  secondaryLabel?: string;
 }
 
 export function TestTypeSelect({
@@ -22,6 +30,8 @@ export function TestTypeSelect({
   parameterLinks = [],
   pendingLinkTestId = null,
   onToggleParameterLink,
+  secondaryTestIds,
+  secondaryLabel,
 }: TestTypeSelectProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedSearchQuery = normalizeSearch(searchQuery);
@@ -42,6 +52,15 @@ export function TestTypeSelect({
       ),
     );
   }, [normalizedSearchQuery, sorted]);
+  const secondary = useMemo(() => new Set(secondaryTestIds ?? []), [secondaryTestIds]);
+  const primaryTests = useMemo(
+    () => filtered.filter((test) => !secondary.has(test.id)),
+    [filtered, secondary],
+  );
+  const secondaryTests = useMemo(
+    () => filtered.filter((test) => secondary.has(test.id)),
+    [filtered, secondary],
+  );
   const selected = new Set(selectedTestIds);
   const activePairByTestId = new Map<number, ParameterLink>();
   parameterLinks.forEach((link) => {
@@ -58,6 +77,65 @@ export function TestTypeSelect({
     }
 
     onChange([...selectedTestIds, testId]);
+  }
+
+  function renderTestRow(test: TestType) {
+    const activePair = activePairByTestId.get(test.id);
+    const isPendingLink = pendingLinkTestId === test.id;
+    return (
+      <div
+        key={`${test.id}-${activePair?.id ?? 'none'}-${isPendingLink ? 'pending' : 'idle'}`}
+        className={clsx(
+          "group relative flex items-center gap-2 border border-transparent px-1.5 py-1 text-xs hover:border-ink/20",
+          isPendingLink && "border-amber-400/70 bg-amber-50",
+        )}
+      >
+        <label
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
+          title={test.displayName}
+        >
+          <input
+            type="checkbox"
+            checked={selectedTestIds.includes(test.id)}
+            onChange={() => toggleTest(test.id)}
+            className="accent-ink"
+          />
+          <span className="min-w-0 flex-1 truncate">{test.displayName}</span>
+        </label>
+        {onToggleParameterLink && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onToggleParameterLink(test.id);
+            }}
+            className={clsx(
+              "shrink-0 rounded-sm border p-0.5 transition",
+              activePair
+                ? "border-surge/30 bg-surge/10 text-surge opacity-100"
+                : isPendingLink
+                  ? "animate-pulse border-amber-500 bg-amber-300 text-ink opacity-100"
+                  : "border-transparent text-ink/35 opacity-0 hover:border-ink/20 hover:bg-ink/5 hover:text-ink hover:opacity-100 group-hover:opacity-100",
+            )}
+            title={
+              activePair
+                ? "Отключить связку эффективности"
+                : isPendingLink
+                  ? "Отменить выбор первого параметра"
+                  : pendingLinkTestId
+                    ? "Выбрать вторым параметром пары"
+                    : "Выбрать первым параметром пары"
+            }
+            aria-label="Настроить связку эффективности"
+          >
+            {(activePair || isPendingLink) && <Link2 className="h-3.5 w-3.5" />}
+            {!activePair && !isPendingLink && (
+              <Link2 className="h-3.5 w-3.5 opacity-70" />
+            )}
+          </button>
+        )}
+      </div>
+    );
   }
 
   if (sorted.length === 0) {
@@ -97,64 +175,15 @@ export function TestTypeSelect({
         {filtered.length === 0 && (
           <div className="px-1.5 py-2 text-xs text-ink/45">Ничего не найдено</div>
         )}
-        {filtered.map((test) => {
-          const activePair = activePairByTestId.get(test.id);
-          const isPendingLink = pendingLinkTestId === test.id;
-          return (
-            <div
-              key={`${test.id}-${activePair?.id ?? 'none'}-${isPendingLink ? 'pending' : 'idle'}`}
-              className={clsx(
-                "group relative flex items-center gap-2 border border-transparent px-1.5 py-1 text-xs hover:border-ink/20",
-                isPendingLink && "border-amber-400/70 bg-amber-50",
-              )}
-            >
-              <label
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
-                title={test.displayName}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedTestIds.includes(test.id)}
-                  onChange={() => toggleTest(test.id)}
-                  className="accent-ink"
-                />
-                <span className="min-w-0 flex-1 truncate">{test.displayName}</span>
-              </label>
-              {onToggleParameterLink && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.currentTarget.blur();
-                    onToggleParameterLink(test.id);
-                  }}
-                  className={clsx(
-                    "shrink-0 rounded-sm border p-0.5 transition",
-                    activePair
-                      ? "border-surge/30 bg-surge/10 text-surge opacity-100"
-                      : isPendingLink
-                        ? "animate-pulse border-amber-500 bg-amber-300 text-ink opacity-100"
-                        : "border-transparent text-ink/35 opacity-0 hover:border-ink/20 hover:bg-ink/5 hover:text-ink hover:opacity-100 group-hover:opacity-100",
-                  )}
-                  title={
-                    activePair
-                      ? "Отключить связку эффективности"
-                      : isPendingLink
-                        ? "Отменить выбор первого параметра"
-                        : pendingLinkTestId
-                          ? "Выбрать вторым параметром пары"
-                          : "Выбрать первым параметром пары"
-                  }
-                  aria-label="Настроить связку эффективности"
-                >
-                  {(activePair || isPendingLink) && <Link2 className="h-3.5 w-3.5" />}
-                  {!activePair && !isPendingLink && (
-                    <Link2 className="h-3.5 w-3.5 opacity-70" />
-                  )}
-                </button>
-              )}
-            </div>
-          );
-        })}
+        {primaryTests.map(renderTestRow)}
+        {secondaryTests.length > 0 && (
+          <>
+            <p className="border-t border-ink/10 px-1.5 pb-0.5 pt-1.5 text-[11px] uppercase tracking-wide text-ink/45">
+              {secondaryLabel ?? "Выбрано в других файлах"}
+            </p>
+            {secondaryTests.map(renderTestRow)}
+          </>
+        )}
       </div>
     </div>
     </div>

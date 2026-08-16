@@ -17,8 +17,9 @@ use crate::{
     errors::AppError,
     models::{
         ChartAveragePoint, ChartDataset, ChartObject, ChartPoint, ChartStats, ChartTest,
-        ChartTestStats, ChartValuePoint, DataQuery, FileDetails, FileInfo, FileMeasurementRecord,
-        ParsedFile, TechnologicalObject, TestType,
+        ChartTestStats, ChartValuePoint, DataQuery, DocumentCategory, DocumentInfo, DocumentRow,
+        FileDetails, FileInfo, FileMeasurementRecord, ParsedFile, RetroFact, RetroFileDetails,
+        RetroFileInfo, RetroParsedFile, TechnologicalObject, TestType, RETRO_OBJECT_KEY,
     },
     storage::migrations::run_migrations,
 };
@@ -26,6 +27,12 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PersistedFile {
     pub parsed: ParsedFile,
+    pub file_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistedRetroFile {
+    pub parsed: RetroParsedFile,
     pub file_hash: String,
 }
 
@@ -462,6 +469,11 @@ impl Database {
         Ok(items)
     }
 
+    /// `test_types` is shared between daily and retro mode (intentionally,
+    /// so an auto-link — see src/lib/parameter-links.ts — could in
+    /// principle span both). This must check both `measurements` and
+    /// `retro_points`, or rescanning a daily archive would delete test
+    /// types that are only referenced by retro data (and vice versa).
     pub fn cleanup_unused_test_types(&self) -> Result<(), AppError> {
         let conn = self.connection.lock();
         conn.execute(
@@ -470,6 +482,11 @@ impl Database {
             WHERE id NOT IN (
                 SELECT DISTINCT test_id
                 FROM measurements
+                WHERE test_id IS NOT NULL
+            )
+            AND id NOT IN (
+                SELECT DISTINCT test_id
+                FROM retro_points
                 WHERE test_id IS NOT NULL
             )
             "#,
@@ -793,6 +810,795 @@ impl Database {
             Ok(None)
         }
     }
+
+    // --- Retrospective ("retro") mode --------------------------------------------------
+
+    pub fn get_or_create_retro_archive(&self, path: &str, file_count: usize) -> Result<i64, AppError> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.connection.lock();
+        conn.execute(
+            r#"
+            INSERT INTO retro_archives(path, last_scan, file_count)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(path) DO UPDATE SET
+                last_scan = excluded.last_scan,
+                file_count = excluded.file_count
+            "#,
+            params![path, now, file_count as i64],
+        )?;
+
+        let archive_id = conn.query_row(
+            "SELECT id FROM retro_archives WHERE path = ?1",
+            params![path],
+            |row| row.get(0),
+        )?;
+
+        Ok(archive_id)
+    }
+
+    pub fn get_latest_retro_archive_id(&self) -> Result<Option<i64>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare("SELECT id FROM retro_archives ORDER BY last_scan DESC LIMIT 1")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn retro_archive_path_by_id(&self, archive_id: i64) -> Result<Option<String>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare("SELECT path FROM retro_archives WHERE id = ?1")?;
+        let mut rows = stmt.query(params![archive_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Keyed by the sheet-level filename (`"<file>::<sheet>"`), matching
+    /// `RetroParsedFile::filename` — one physical file can own several rows.
+    pub fn get_retro_file_hashes(&self, archive_id: i64) -> Result<HashMap<String, String>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare("SELECT filename, file_hash FROM retro_files WHERE archive_id = ?1")?;
+        let rows = stmt.query_map(params![archive_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut hash_map = HashMap::new();
+        for row in rows {
+            let (filename, hash) = row?;
+            hash_map.insert(filename, hash);
+        }
+        Ok(hash_map)
+    }
+
+    pub fn remove_absent_retro_files(
+        &self,
+        archive_id: i64,
+        existing_files: &HashSet<String>,
+    ) -> Result<(), AppError> {
+        let mut conn = self.connection.lock();
+        let tx = conn.transaction()?;
+
+        let mut stmt = tx.prepare("SELECT id, filename FROM retro_files WHERE archive_id = ?1")?;
+        let rows = stmt.query_map(params![archive_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut delete_ids = Vec::new();
+        for row in rows {
+            let (id, filename) = row?;
+            if !existing_files.contains(&filename) {
+                delete_ids.push(id);
+            }
+        }
+
+        drop(stmt);
+        for id in delete_ids {
+            tx.execute("DELETE FROM retro_files WHERE id = ?1", params![id])?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn upsert_retro_files(
+        &self,
+        archive_id: i64,
+        parsed_files: &[PersistedRetroFile],
+    ) -> Result<(), AppError> {
+        if parsed_files.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.connection.lock();
+        let tx = conn.transaction()?;
+        let parsed_at = Utc::now().to_rfc3339();
+
+        for entry in parsed_files {
+            let warnings_json = serde_json::to_string(&entry.parsed.warnings)?;
+            let period_from = entry.parsed.period_from().map(|date| date.to_string());
+            let period_to = entry.parsed.period_to().map(|date| date.to_string());
+
+            tx.execute(
+                r#"
+                INSERT INTO retro_files(archive_id, filename, title, status, warnings, file_hash, parsed_at, period_from, period_to, source_label)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT(archive_id, filename) DO UPDATE SET
+                    title = excluded.title,
+                    status = excluded.status,
+                    warnings = excluded.warnings,
+                    file_hash = excluded.file_hash,
+                    parsed_at = excluded.parsed_at,
+                    period_from = excluded.period_from,
+                    period_to = excluded.period_to,
+                    source_label = excluded.source_label
+                "#,
+                params![
+                    archive_id,
+                    entry.parsed.filename,
+                    entry.parsed.title,
+                    entry.parsed.status.as_db_value(),
+                    warnings_json,
+                    entry.file_hash,
+                    parsed_at,
+                    period_from,
+                    period_to,
+                    entry.parsed.source_label,
+                ],
+            )?;
+
+            let file_id: i64 = tx.query_row(
+                "SELECT id FROM retro_files WHERE archive_id = ?1 AND filename = ?2",
+                params![archive_id, entry.parsed.filename],
+                |row| row.get(0),
+            )?;
+
+            tx.execute("DELETE FROM retro_points WHERE file_id = ?1", params![file_id])?;
+            tx.execute("DELETE FROM retro_facts WHERE file_id = ?1", params![file_id])?;
+
+            for (index, fact) in entry.parsed.facts.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO retro_facts(file_id, label, value, raw_value, order_index) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![file_id, fact.label, fact.value, fact.raw_value, index as i64],
+                )?;
+            }
+
+            let mut test_id_cache = HashMap::<String, i64>::new();
+            for point in &entry.parsed.points {
+                let test_id = if let Some(id) = test_id_cache.get(&point.test_name) {
+                    *id
+                } else {
+                    let id = upsert_test_type(&tx, &point.test_name, &point.test_name_raw)?;
+                    test_id_cache.insert(point.test_name.clone(), id);
+                    id
+                };
+
+                tx.execute(
+                    r#"
+                    INSERT INTO retro_points(file_id, test_id, object_key, object_label, object_order, period_date, value, raw_value)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    ON CONFLICT(file_id, test_id, object_key, period_date) DO UPDATE SET
+                        value = excluded.value,
+                        raw_value = excluded.raw_value
+                    "#,
+                    params![
+                        file_id,
+                        test_id,
+                        RETRO_OBJECT_KEY,
+                        "",
+                        1_i64,
+                        point.period_date.to_string(),
+                        point.value,
+                        point.raw_value,
+                    ],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_retro_file_list(&self, archive_id: i64) -> Result<Vec<RetroFileInfo>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, filename, title, status, warnings, parsed_at, period_from, period_to, source_label
+            FROM retro_files
+            WHERE archive_id = ?1
+            ORDER BY title ASC, filename ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![archive_id], |row| {
+            let warnings_raw: Option<String> = row.get(4)?;
+            let warnings = warnings_raw
+                .as_deref()
+                .and_then(|w| serde_json::from_str::<Vec<String>>(w).ok())
+                .unwrap_or_default();
+
+            Ok(RetroFileInfo {
+                id: row.get(0)?,
+                filename: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                warnings,
+                parsed_at: row.get(5)?,
+                period_from: row.get(6)?,
+                period_to: row.get(7)?,
+                source_label: row.get(8)?,
+            })
+        })?;
+
+        let mut files = Vec::new();
+        for row in rows {
+            files.push(row?);
+        }
+        Ok(files)
+    }
+
+    pub fn get_retro_file_details(&self, file_id: i64) -> Result<RetroFileDetails, AppError> {
+        let conn = self.connection.lock();
+        let file_row = conn.query_row(
+            "SELECT filename, title, status, warnings FROM retro_files WHERE id = ?1",
+            params![file_id],
+            |row| {
+                let warnings_raw: Option<String> = row.get(3)?;
+                let warnings = warnings_raw
+                    .as_deref()
+                    .and_then(|w| serde_json::from_str::<Vec<String>>(w).ok())
+                    .unwrap_or_default();
+
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    warnings,
+                ))
+            },
+        )?;
+
+        let mut facts_stmt =
+            conn.prepare("SELECT label, value, raw_value FROM retro_facts WHERE file_id = ?1 ORDER BY order_index ASC")?;
+        let fact_rows = facts_stmt.query_map(params![file_id], |row| {
+            Ok(RetroFact {
+                label: row.get(0)?,
+                value: row.get(1)?,
+                raw_value: row.get(2)?,
+            })
+        })?;
+        let mut facts = Vec::new();
+        for row in fact_rows {
+            facts.push(row?);
+        }
+
+        Ok(RetroFileDetails {
+            id: file_id,
+            filename: file_row.0,
+            title: file_row.1,
+            status: file_row.2,
+            warnings: file_row.3,
+            facts,
+        })
+    }
+
+    pub fn get_retro_test_types_for_archive(&self, archive_id: i64) -> Result<Vec<TestType>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT DISTINCT
+                tt.id,
+                tt.canonical_name,
+                tt.display_name,
+                tt.unit,
+                tt.aliases
+            FROM test_types tt
+            JOIN retro_points rp ON rp.test_id = tt.id
+            JOIN retro_files rf ON rf.id = rp.file_id
+            WHERE rf.archive_id = ?1
+            ORDER BY tt.display_name
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![archive_id], |row| {
+            let aliases_raw: Option<String> = row.get(4)?;
+            let aliases = aliases_raw
+                .as_deref()
+                .and_then(|v| serde_json::from_str::<Vec<String>>(v).ok())
+                .unwrap_or_default();
+            Ok(TestType {
+                id: row.get(0)?,
+                canonical_name: row.get(1)?,
+                display_name: row.get(2)?,
+                unit: row.get(3)?,
+                aliases,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
+    /// How many monthly readings are actually stored for one sheet.
+    /// Diagnostics only (see `examples/dump_retro.rs`): the retro upsert
+    /// resolves a (file, test, month) collision by overwriting, so this is
+    /// the way to notice a parser change that silently folds two parameters
+    /// into one.
+    pub fn count_retro_points(&self, file_id: i64) -> Result<i64, AppError> {
+        let conn = self.connection.lock();
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM retro_points WHERE file_id = ?1",
+            params![file_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// The parameter list the retro sidebar actually shows: only the
+    /// parameters present in the sheet the user picked in the file list.
+    /// (`get_retro_test_types_for_archive` stays for the archive summary and
+    /// for resolving parameters that are still selected from another sheet.)
+    pub fn get_retro_test_types_for_file(&self, file_id: i64) -> Result<Vec<TestType>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT DISTINCT
+                tt.id,
+                tt.canonical_name,
+                tt.display_name,
+                tt.unit,
+                tt.aliases
+            FROM test_types tt
+            JOIN retro_points rp ON rp.test_id = tt.id
+            WHERE rp.file_id = ?1
+            ORDER BY tt.display_name
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![file_id], |row| {
+            let aliases_raw: Option<String> = row.get(4)?;
+            let aliases = aliases_raw
+                .as_deref()
+                .and_then(|v| serde_json::from_str::<Vec<String>>(v).ok())
+                .unwrap_or_default();
+            Ok(TestType {
+                id: row.get(0)?,
+                canonical_name: row.get(1)?,
+                display_name: row.get(2)?,
+                unit: row.get(3)?,
+                aliases,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
+    /// Mirrors `query_chart_data` exactly in shape (same `ChartDataset`
+    /// output, same stats formula) so the frontend chart/statistics/
+    /// trendline/efficiency machinery works unchanged in retro mode.
+    ///
+    /// Retro mode has no object dimension: every point sits under the one
+    /// synthetic object (`RETRO_OBJECT_KEY`), so `query.object_keys` is
+    /// ignored and the selection is driven purely by `test_ids` — a retro
+    /// test id already identifies one parameter of one sheet. Objects also
+    /// have no activity flag (there is no "section taken offline" concept in
+    /// a retrospective file), so `object_active` is always true.
+    pub fn query_retro_chart_data(&self, query: &DataQuery) -> Result<ChartDataset, AppError> {
+        let conn = self.connection.lock();
+
+        let requested_test_ids = dedup_i64(&query.test_ids);
+
+        let test_filter = if requested_test_ids.is_empty() {
+            None
+        } else {
+            Some(requested_test_ids.iter().copied().collect::<HashSet<i64>>())
+        };
+
+        let mut test_name_map = HashMap::<i64, String>::new();
+        if !requested_test_ids.is_empty() {
+            let mut test_stmt =
+                conn.prepare("SELECT id, display_name FROM test_types WHERE id = ?1 LIMIT 1")?;
+            for test_id in &requested_test_ids {
+                let mut rows = test_stmt.query(params![test_id])?;
+                if let Some(row) = rows.next()? {
+                    test_name_map.insert(row.get::<_, i64>(0)?, row.get::<_, String>(1)?);
+                }
+            }
+        }
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                rp.period_date,
+                rp.test_id,
+                tt.display_name,
+                rp.object_key,
+                rp.object_label,
+                rp.object_order,
+                rp.value
+            FROM retro_points rp
+            JOIN retro_files rf ON rf.id = rp.file_id
+            JOIN test_types tt ON tt.id = rp.test_id
+            WHERE rf.archive_id = ?1
+              AND (?2 IS NULL OR rp.period_date >= ?2)
+              AND (?3 IS NULL OR rp.period_date <= ?3)
+            ORDER BY rp.period_date ASC, rp.test_id ASC, rp.object_order ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(
+            params![query.archive_id, query.date_from, query.date_to],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)? as u16,
+                    row.get::<_, Option<f64>>(6)?,
+                ))
+            },
+        )?;
+
+        let mut by_date: BTreeMap<String, HashMap<i64, HashMap<String, Option<f64>>>> =
+            BTreeMap::new();
+        let mut all_object_meta = HashMap::<String, (String, u16)>::new();
+        let mut observed_test_ids = HashSet::<i64>::new();
+        let mut stats_by_test = HashMap::<i64, Vec<f64>>::new();
+
+        for row in rows {
+            let (date, test_id, test_name, object_key, object_label, object_order, value) = row?;
+
+            all_object_meta
+                .entry(object_key.clone())
+                .and_modify(|current| {
+                    if object_order < current.1 {
+                        *current = (object_label.clone(), object_order);
+                    }
+                })
+                .or_insert((object_label.clone(), object_order));
+
+            if let Some(filter) = &test_filter {
+                if !filter.contains(&test_id) {
+                    continue;
+                }
+            }
+
+            observed_test_ids.insert(test_id);
+            test_name_map.entry(test_id).or_insert(test_name);
+
+            by_date
+                .entry(date)
+                .or_default()
+                .entry(test_id)
+                .or_default()
+                .insert(object_key, value);
+
+            if let Some(v) = value {
+                stats_by_test.entry(test_id).or_default().push(v);
+            }
+        }
+
+        let tests = if requested_test_ids.is_empty() {
+            let mut observed = observed_test_ids.into_iter().collect::<Vec<i64>>();
+            observed.sort_by(|left, right| {
+                let left_name = test_name_map.get(left).cloned().unwrap_or_default();
+                let right_name = test_name_map.get(right).cloned().unwrap_or_default();
+                left_name.cmp(&right_name)
+            });
+            observed
+                .into_iter()
+                .map(|test_id| ChartTest {
+                    test_id,
+                    test_name: test_name_map
+                        .get(&test_id)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Параметр {test_id}")),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            requested_test_ids
+                .into_iter()
+                .filter_map(|test_id| {
+                    test_name_map
+                        .get(&test_id)
+                        .cloned()
+                        .map(|test_name| ChartTest { test_id, test_name })
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Always exactly the one synthetic retro object (see
+        // `RETRO_OBJECT_KEY`); built from what the rows actually carried so
+        // an archive written by an older parser version still renders.
+        let mut objects = all_object_meta
+            .iter()
+            .map(|(key, (label, order))| ChartObject {
+                object_key: key.clone(),
+                object_label: label.clone(),
+                object_order: *order,
+                object_active: true,
+            })
+            .collect::<Vec<_>>();
+        objects.sort_by(|left, right| {
+            left.object_order
+                .cmp(&right.object_order)
+                .then(left.object_label.cmp(&right.object_label))
+        });
+
+        let mut points = Vec::with_capacity(by_date.len());
+        for (date, test_map) in by_date {
+            let mut values = Vec::with_capacity(tests.len() * objects.len());
+            let mut averages = Vec::with_capacity(tests.len());
+
+            for test in &tests {
+                let object_values = test_map.get(&test.test_id);
+                let mut local_values = Vec::new();
+
+                for object in &objects {
+                    let value = object_values
+                        .and_then(|map| map.get(&object.object_key))
+                        .copied()
+                        .flatten();
+                    if let Some(v) = value {
+                        local_values.push(v);
+                    }
+                    values.push(ChartValuePoint {
+                        test_id: test.test_id,
+                        object_key: object.object_key.clone(),
+                        value,
+                    });
+                }
+
+                let average = if local_values.is_empty() {
+                    None
+                } else {
+                    Some(local_values.iter().sum::<f64>() / local_values.len() as f64)
+                };
+                averages.push(ChartAveragePoint {
+                    test_id: test.test_id,
+                    value: average,
+                });
+            }
+
+            points.push(ChartPoint {
+                date,
+                values,
+                averages,
+            });
+        }
+
+        let stats_by_test = tests
+            .iter()
+            .map(|test| ChartTestStats {
+                test_id: test.test_id,
+                test_name: test.test_name.clone(),
+                stats: calculate_stats(stats_by_test.remove(&test.test_id).unwrap_or_default()),
+            })
+            .collect::<Vec<_>>();
+
+        Ok(ChartDataset {
+            tests,
+            objects,
+            points,
+            stats_by_test,
+        })
+    }
+
+    // --- Document container (part 5) ----------------------------------------------
+
+    pub fn list_document_categories(&self) -> Result<Vec<DocumentCategory>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare("SELECT id, name, order_index FROM document_categories ORDER BY order_index ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DocumentCategory {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                order_index: row.get(2)?,
+            })
+        })?;
+
+        let mut categories = Vec::new();
+        for row in rows {
+            categories.push(row?);
+        }
+        Ok(categories)
+    }
+
+    pub fn create_document_category(&self, name: &str) -> Result<DocumentCategory, AppError> {
+        let conn = self.connection.lock();
+        let next_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(order_index), 0) + 1 FROM document_categories",
+            [],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO document_categories(name, order_index) VALUES (?1, ?2)",
+            params![name, next_order],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(DocumentCategory {
+            id,
+            name: name.to_string(),
+            order_index: next_order,
+        })
+    }
+
+    pub fn rename_document_category(&self, category_id: i64, name: &str) -> Result<DocumentCategory, AppError> {
+        let conn = self.connection.lock();
+        conn.execute(
+            "UPDATE document_categories SET name = ?1 WHERE id = ?2",
+            params![name, category_id],
+        )?;
+        conn.query_row(
+            "SELECT id, name, order_index FROM document_categories WHERE id = ?1",
+            params![category_id],
+            |row| {
+                Ok(DocumentCategory {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    order_index: row.get(2)?,
+                })
+            },
+        )
+        .map_err(AppError::from)
+    }
+
+    /// Documents in the deleted category become uncategorized rather than
+    /// being deleted themselves (`category_id` is `ON DELETE SET NULL`).
+    pub fn delete_document_category(&self, category_id: i64) -> Result<(), AppError> {
+        let conn = self.connection.lock();
+        conn.execute("DELETE FROM document_categories WHERE id = ?1", params![category_id])?;
+        Ok(())
+    }
+
+    pub fn list_documents(&self, category_id: Option<i64>) -> Result<Vec<DocumentInfo>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, category_id, title, original_name, extension, size_bytes, notes, added_at, order_index
+            FROM documents
+            WHERE (?1 IS NULL AND category_id IS NULL) OR category_id = ?1
+            ORDER BY order_index ASC, title ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![category_id], |row| Ok(document_info_from_row(row)?))?;
+
+        let mut documents = Vec::new();
+        for row in rows {
+            documents.push(row?);
+        }
+        Ok(documents)
+    }
+
+    pub fn list_all_documents(&self) -> Result<Vec<DocumentInfo>, AppError> {
+        let conn = self.connection.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, category_id, title, original_name, extension, size_bytes, notes, added_at, order_index
+            FROM documents
+            ORDER BY order_index ASC, title ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| Ok(document_info_from_row(row)?))?;
+
+        let mut documents = Vec::new();
+        for row in rows {
+            documents.push(row?);
+        }
+        Ok(documents)
+    }
+
+    pub fn insert_document(
+        &self,
+        category_id: Option<i64>,
+        title: &str,
+        stored_name: &str,
+        original_name: &str,
+        extension: &str,
+        size_bytes: i64,
+    ) -> Result<DocumentInfo, AppError> {
+        let conn = self.connection.lock();
+        let next_order: i64 =
+            conn.query_row("SELECT COALESCE(MAX(order_index), 0) + 1 FROM documents", [], |row| row.get(0))?;
+        let added_at = Utc::now().to_rfc3339();
+
+        conn.execute(
+            r#"
+            INSERT INTO documents(category_id, title, stored_name, original_name, extension, size_bytes, notes, added_at, order_index)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)
+            "#,
+            params![category_id, title, stored_name, original_name, extension, size_bytes, added_at, next_order],
+        )?;
+        let id = conn.last_insert_rowid();
+
+        Ok(DocumentInfo {
+            id,
+            category_id,
+            title: title.to_string(),
+            original_name: original_name.to_string(),
+            extension: extension.to_string(),
+            size_bytes,
+            notes: None,
+            added_at,
+            order_index: next_order,
+        })
+    }
+
+    pub fn update_document(
+        &self,
+        document_id: i64,
+        title: &str,
+        category_id: Option<i64>,
+        notes: Option<&str>,
+    ) -> Result<DocumentInfo, AppError> {
+        let conn = self.connection.lock();
+        conn.execute(
+            "UPDATE documents SET title = ?1, category_id = ?2, notes = ?3 WHERE id = ?4",
+            params![title, category_id, notes, document_id],
+        )?;
+        conn.query_row(
+            r#"
+            SELECT id, category_id, title, original_name, extension, size_bytes, notes, added_at, order_index
+            FROM documents WHERE id = ?1
+            "#,
+            params![document_id],
+            |row| Ok(document_info_from_row(row)?),
+        )
+        .map_err(AppError::from)
+    }
+
+    pub fn get_document_row(&self, document_id: i64) -> Result<DocumentRow, AppError> {
+        let conn = self.connection.lock();
+        conn.query_row(
+            r#"
+            SELECT id, category_id, title, original_name, extension, size_bytes, notes, added_at, order_index, stored_name
+            FROM documents WHERE id = ?1
+            "#,
+            params![document_id],
+            |row| {
+                Ok(DocumentRow {
+                    info: document_info_from_row(row)?,
+                    stored_name: row.get(9)?,
+                })
+            },
+        )
+        .map_err(AppError::from)
+    }
+
+    /// Returns the deleted row (so the caller can remove its file from
+    /// disk) before deleting it from the database.
+    pub fn delete_document(&self, document_id: i64) -> Result<DocumentRow, AppError> {
+        let row = self.get_document_row(document_id)?;
+        let conn = self.connection.lock();
+        conn.execute("DELETE FROM documents WHERE id = ?1", params![document_id])?;
+        Ok(row)
+    }
+}
+
+fn document_info_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentInfo> {
+    Ok(DocumentInfo {
+        id: row.get(0)?,
+        category_id: row.get(1)?,
+        title: row.get(2)?,
+        original_name: row.get(3)?,
+        extension: row.get(4)?,
+        size_bytes: row.get(5)?,
+        notes: row.get(6)?,
+        added_at: row.get(7)?,
+        order_index: row.get(8)?,
+    })
 }
 
 fn upsert_test_type(
@@ -910,8 +1716,11 @@ mod tests {
     use chrono::NaiveDate;
     use tempfile::tempdir;
 
-    use super::{Database, PersistedFile};
-    use crate::models::{DataQuery, FileStatus, Measurement, ObjectValue, ParsedFile};
+    use super::{Database, PersistedFile, PersistedRetroFile};
+    use crate::models::{
+        DataQuery, FileStatus, Measurement, ObjectValue, ParsedFile, RetroParsedFile,
+        RetroPointValue,
+    };
 
     #[test]
     fn query_chart_data_omits_inactive_object_values_even_when_selected() {
@@ -1047,5 +1856,150 @@ mod tests {
             },
             file_hash: format!("{filename}-{value}"),
         }
+    }
+
+    #[test]
+    fn query_retro_chart_data_builds_dataset_from_monthly_points() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+        let archive_id = db
+            .get_or_create_retro_archive("/tmp/retro-archive", 1)
+            .expect("retro archive id");
+
+        db.upsert_retro_files(
+            archive_id,
+            &[retro_persisted_file(
+                "1.xlsx::Sheet1",
+                "ХПКCr на входе ОС",
+                &[("2023-01-01", Some(726.0)), ("2023-02-01", Some(587.0))],
+            )],
+        )
+        .expect("insert retro file");
+
+        let test_id = db
+            .get_retro_test_types_for_archive(archive_id)
+            .expect("retro test types")
+            .into_iter()
+            .find(|test| test.display_name == "ХПКCr на входе ОС")
+            .expect("chpk test")
+            .id;
+
+        let dataset = db
+            .query_retro_chart_data(&DataQuery {
+                session_token: "test".to_string(),
+                archive_id,
+                test_ids: vec![test_id],
+                object_keys: vec!["default".to_string()],
+                date_from: None,
+                date_to: None,
+            })
+            .expect("retro chart data");
+
+        assert_eq!(dataset.points.len(), 2);
+        assert_eq!(dataset.points[0].date, "2023-01-01");
+        assert_eq!(dataset.points[0].values[0].value, Some(726.0));
+        assert_eq!(dataset.points[1].values[0].value, Some(587.0));
+        assert_eq!(dataset.stats_by_test[0].stats.points_with_values, 2);
+        assert_eq!(dataset.stats_by_test[0].stats.average, Some((726.0 + 587.0) / 2.0));
+    }
+
+    #[test]
+    fn cleanup_unused_test_types_preserves_retro_only_test_types() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+        let archive_id = db
+            .get_or_create_retro_archive("/tmp/retro-archive", 1)
+            .expect("retro archive id");
+
+        db.upsert_retro_files(
+            archive_id,
+            &[retro_persisted_file(
+                "1.xlsx::Sheet1",
+                "ХПКCr на входе ОС",
+                &[("2023-01-01", Some(726.0))],
+            )],
+        )
+        .expect("insert retro file");
+
+        // A daily-mode rescan (even with zero files) must not delete
+        // test_types that are only referenced by retro_points.
+        db.cleanup_unused_test_types().expect("cleanup");
+
+        let remaining = db
+            .get_retro_test_types_for_archive(archive_id)
+            .expect("retro test types");
+        assert_eq!(remaining.len(), 1, "retro-only test type must survive cleanup");
+    }
+
+    fn retro_persisted_file(
+        filename: &str,
+        test_name: &str,
+        monthly_values: &[(&str, Option<f64>)],
+    ) -> PersistedRetroFile {
+        let points = monthly_values
+            .iter()
+            .map(|(date, value)| RetroPointValue {
+                test_name: test_name.to_string(),
+                test_name_raw: test_name.to_string(),
+                period_date: NaiveDate::parse_from_str(date, "%Y-%m-%d").expect("date"),
+                value: *value,
+                raw_value: value.map(|v| v.to_string()).unwrap_or_default(),
+            })
+            .collect();
+
+        PersistedRetroFile {
+            parsed: RetroParsedFile {
+                filename: filename.to_string(),
+                title: "Тестовый лист".to_string(),
+                source_label: "Вход ОС".to_string(),
+                status: FileStatus::Ok,
+                warnings: Vec::new(),
+                facts: Vec::new(),
+                points,
+            },
+            file_hash: format!("{filename}-hash"),
+        }
+    }
+
+    #[test]
+    fn new_database_seeds_four_default_document_categories() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+
+        let categories = db.list_document_categories().expect("categories");
+        assert_eq!(categories.len(), 4);
+        assert_eq!(
+            categories.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["Методики", "Отчётные формы", "Нормативы", "Прочее"]
+        );
+    }
+
+    #[test]
+    fn document_crud_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("test.sqlite")).expect("database");
+
+        let categories = db.list_document_categories().expect("categories");
+        let category_id = categories[0].id;
+
+        let inserted = db
+            .insert_document(Some(category_id), "СОП-1", "abc123.pdf", "СОП-1.pdf", "pdf", 1024)
+            .expect("insert document");
+        assert_eq!(inserted.title, "СОП-1");
+        assert_eq!(inserted.category_id, Some(category_id));
+
+        let listed = db.list_documents(Some(category_id)).expect("list documents");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, inserted.id);
+
+        let updated = db
+            .update_document(inserted.id, "СОП-1 (ред.2)", Some(category_id), Some("актуальная версия"))
+            .expect("update document");
+        assert_eq!(updated.title, "СОП-1 (ред.2)");
+        assert_eq!(updated.notes.as_deref(), Some("актуальная версия"));
+
+        let deleted_row = db.delete_document(inserted.id).expect("delete document");
+        assert_eq!(deleted_row.stored_name, "abc123.pdf");
+        assert!(db.list_documents(Some(category_id)).expect("list after delete").is_empty());
     }
 }

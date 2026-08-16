@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bold, Check, Settings, Type } from 'lucide-react';
+import { Bold, Check, FileStack, Settings, Type } from 'lucide-react';
 import clsx from 'clsx';
+
+import { DocumentsModal } from '@/components/documents/DocumentsModal';
 
 type InterfaceTheme = 'white';
 type InterfaceScale = 'normal' | 'large' | 'extra-large' | 'huge' | 'maximum';
@@ -39,6 +41,7 @@ const defaultSettings: InterfaceSettings = {
 
 export function InterfaceSettingsMenu() {
   const [open, setOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
   const [settings, setSettings] = useState<InterfaceSettings>(defaultSettings);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -167,9 +170,23 @@ export function InterfaceSettingsMenu() {
               </span>
               {settings.boldText && <Check className="h-4 w-4" />}
             </button>
+
+            <button
+              type="button"
+              className="flex h-10 w-full items-center gap-2 border border-ink/25 px-3 text-left hover:bg-ink/5"
+              onClick={() => {
+                setDocumentsOpen(true);
+                setOpen(false);
+              }}
+            >
+              <FileStack className="h-4 w-4" />
+              Документация
+            </button>
           </div>
         </div>
       )}
+
+      <DocumentsModal open={documentsOpen} onClose={() => setDocumentsOpen(false)} />
     </div>
   );
 }

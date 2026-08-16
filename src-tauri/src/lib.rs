@@ -25,15 +25,17 @@ use storage::Database;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
+    pub documents_dir: PathBuf,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     watched_archives: Arc<Mutex<HashSet<String>>>,
     normalizer: Arc<NameNormalizer>,
 }
 
 impl AppState {
-    fn new(db: Database, normalizer: NameNormalizer) -> Self {
+    fn new(db: Database, normalizer: NameNormalizer, documents_dir: PathBuf) -> Self {
         Self {
             db,
+            documents_dir,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             watched_archives: Arc::new(Mutex::new(HashSet::new())),
             normalizer: Arc::new(normalizer),
@@ -96,8 +98,11 @@ pub fn run() {
             let db = Database::new(&db_path)?;
             db.ensure_default_admin()?;
 
+            let documents_dir = runtime_dir.join("documents");
+            fs::create_dir_all(&documents_dir)?;
+
             let normalizer = NameNormalizer::from_aliases_file(aliases_file)?;
-            let state = AppState::new(db, normalizer);
+            let state = AppState::new(db, normalizer, documents_dir);
 
             app.manage(state);
             Ok(())
@@ -120,7 +125,25 @@ pub fn run() {
             commands::auth::whoami,
             commands::settings::get_setting,
             commands::settings::set_setting,
-            commands::settings::get_last_archive_path
+            commands::settings::get_last_archive_path,
+            commands::retro::select_retro_archive,
+            commands::retro::rescan_retro_archive,
+            commands::retro::get_retro_file_list,
+            commands::retro::get_retro_file_details,
+            commands::retro::get_retro_test_types,
+            commands::retro::get_retro_chart_data,
+            commands::retro::get_last_retro_archive_path,
+            commands::documents::list_document_categories,
+            commands::documents::create_document_category,
+            commands::documents::rename_document_category,
+            commands::documents::delete_document_category,
+            commands::documents::list_documents,
+            commands::documents::list_all_documents,
+            commands::documents::import_document,
+            commands::documents::update_document,
+            commands::documents::delete_document,
+            commands::documents::read_document_bytes,
+            commands::documents::reveal_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

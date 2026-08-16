@@ -225,7 +225,9 @@ fn extract_object_number(value: &str) -> Option<u16> {
     (1..=MAX_NUMERIC_OBJECT).contains(&number).then_some(number)
 }
 
-fn canonical_object_key(value: &str) -> String {
+/// `pub(crate)` so the retrospective-file parser can reuse the same
+/// object-key derivation (e.g. "Секция 3" -> "3") instead of duplicating it.
+pub(crate) fn canonical_object_key(value: &str) -> String {
     if let Some(number) = extract_object_number(value) {
         return number.to_string();
     }

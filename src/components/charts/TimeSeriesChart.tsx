@@ -10,7 +10,6 @@ import {
   Printer,
 } from "lucide-react";
 import {
-  CartesianGrid,
   Customized,
   Line,
   LineChart,
@@ -53,6 +52,15 @@ interface TimeSeriesChartProps {
   onTrendlinesChange?: (reports: ChartTrendlineReport[]) => void;
   onExportPng?: () => void;
   onPrintChart?: () => void;
+  /**
+   * Overrides how the X axis's `date` value is displayed. Defaults to
+   * `formatXAxisDate` (calendar date formatting). Period-overlay mode
+   * passes a formatter for ordinal phase positions ("Месяц 3") instead of
+   * calendar dates — see src/lib/period-overlay.ts.
+   */
+  xTickFormatter?: (value: string) => string;
+  /** Minimum pixel gap between X axis ticks. Defaults to 28 (dense calendar dates). */
+  xMinTickGap?: number;
 }
 
 type ChartRow = Record<string, string | number | null>;
@@ -93,6 +101,12 @@ interface AxisGroup {
   orientation: "left";
   sideIndex: number;
   domain: [number, number];
+  ticks: number[];
+  minorTicks: number[];
+  step: number;
+  divisionsCount: number;
+  canIncrease: boolean;
+  canDecrease: boolean;
   tests: ChartTest[];
 }
 
@@ -145,9 +159,8 @@ interface GuideChartState {
 const AXIS_WIDTH = 36;
 const AXIS_STROKE = "#6b7280";
 const AXIS_TO_PLOT_GAP = 10;
-const DEFAULT_AXIS_TICK_COUNT = 7;
-const MIN_AXIS_TICK_COUNT = 3;
-const MAX_AXIS_TICK_COUNT = 14;
+const MAJOR_GRID_STROKE = "#d0d7df";
+const MINOR_GRID_STROKE = "#e8ecf0";
 const AXIS_CONTROL_ZONE_WIDTH = 24;
 const AXIS_CONTROL_BUTTON_SIZE = 18;
 const AXIS_CONTROL_VERTICAL_INSET = 2;
@@ -167,7 +180,11 @@ export function TimeSeriesChart({
   onTrendlinesChange,
   onExportPng,
   onPrintChart,
+  xTickFormatter,
+  xMinTickGap,
 }: TimeSeriesChartProps) {
+  const resolvedXTickFormatter = xTickFormatter ?? formatXAxisDate;
+  const resolvedXMinTickGap = xMinTickGap ?? 28;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartViewportRef = useRef<HTMLDivElement | null>(null);
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
@@ -177,9 +194,9 @@ export function TimeSeriesChart({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
   const [hoveredAxisId, setHoveredAxisId] = useState<string | null>(null);
-  const [axisTickCounts, setAxisTickCounts] = useState<Record<string, number>>(
-    {},
-  );
+  const [axisDensityOffsets, setAxisDensityOffsets] = useState<
+    Record<string, number>
+  >({});
   const [hoveredLegendKey, setHoveredLegendKey] = useState<string | null>(null);
   const [hiddenSeriesKeys, setHiddenSeriesKeys] = useState<Set<string>>(new Set());
 
@@ -433,7 +450,8 @@ export function TimeSeriesChart({
     const grouped = new Map<
       string,
       {
-        domain: [number, number];
+        min: number;
+        max: number;
         tests: ChartTest[];
       }
     >();
@@ -456,31 +474,53 @@ export function TimeSeriesChart({
       if (!range) {
         continue;
       }
-      const domain = buildNiceDomain(range[0], range[1]);
-      const signature = `${normalizeDomainValue(domain[0])}:${normalizeDomainValue(domain[1])}`;
+      const signature = `${normalizeDomainValue(range[0])}:${normalizeDomainValue(range[1])}`;
 
       const bucket = grouped.get(signature);
       if (!bucket) {
-        grouped.set(signature, { domain, tests: [test] });
+        grouped.set(signature, { min: range[0], max: range[1], tests: [test] });
         continue;
       }
       bucket.tests.push(test);
     }
 
-    const groups = Array.from(grouped.values()).map((entry, index) => ({
-      axisId: `axis_group_${index}`,
-      orientation: "left",
-      sideIndex: index,
-      domain: entry.domain,
-      tests: entry.tests,
-    })) as AxisGroup[];
+    const groups: AxisGroup[] = Array.from(grouped.values()).map((entry, index) => {
+      const axisId = `axis_group_${index}`;
+      const offset = axisDensityOffsets[axisId] ?? 0;
+      const scaleConfig = resolveAxisScale(entry.min, entry.max, offset);
+
+      return {
+        axisId,
+        orientation: "left" as const,
+        sideIndex: index,
+        domain: scaleConfig.domain,
+        ticks: scaleConfig.ticks,
+        minorTicks: scaleConfig.minorTicks,
+        step: scaleConfig.step,
+        divisionsCount: scaleConfig.divisionsCount,
+        canIncrease: scaleConfig.canIncrease,
+        canDecrease: scaleConfig.canDecrease,
+        tests: entry.tests,
+      };
+    });
 
     if (groups.length === 0 && prepared.tests.length > 0) {
+      const scaleConfig = resolveAxisScale(
+        0,
+        1,
+        axisDensityOffsets["axis_group_0"] ?? 0,
+      );
       groups.push({
         axisId: "axis_group_0",
         orientation: "left",
         sideIndex: 0,
-        domain: [0, 1],
+        domain: scaleConfig.domain,
+        ticks: scaleConfig.ticks,
+        minorTicks: scaleConfig.minorTicks,
+        step: scaleConfig.step,
+        divisionsCount: scaleConfig.divisionsCount,
+        canIncrease: scaleConfig.canIncrease,
+        canDecrease: scaleConfig.canDecrease,
         tests: [...prepared.tests],
       });
     }
@@ -501,6 +541,7 @@ export function TimeSeriesChart({
       rightCount: 0,
     };
   }, [
+    axisDensityOffsets,
     prepared.rows,
     prepared.tests,
     prepared.trendlines,
@@ -514,7 +555,7 @@ export function TimeSeriesChart({
       axisLayout.groups.map((group) => group.axisId),
     );
 
-    setAxisTickCounts((previous) => {
+    setAxisDensityOffsets((previous) => {
       let hasChanges = false;
       const next: Record<string, number> = {};
 
@@ -665,19 +706,10 @@ export function TimeSeriesChart({
   const axisStripGap = Math.max(2, 2.5 * scale);
   const axisStripTop = axisPlotTop + axisPlotHeight + 6 * scale;
 
-  const adjustAxisTickDensity = (axisId: string, delta: number) => {
-    setAxisTickCounts((previous) => {
-      const current = previous[axisId] ?? DEFAULT_AXIS_TICK_COUNT;
-      const next = clamp(
-        Math.round(current + delta),
-        MIN_AXIS_TICK_COUNT,
-        MAX_AXIS_TICK_COUNT,
-      );
-
-      if (next === current) {
-        return previous;
-      }
-
+  const adjustAxisDensity = (axisId: string, delta: number) => {
+    setAxisDensityOffsets((previous) => {
+      const current = previous[axisId] ?? 0;
+      const next = current + delta;
       return {
         ...previous,
         [axisId]: next,
@@ -925,12 +957,146 @@ export function TimeSeriesChart({
                 onHoverChange?.(null);
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#d0d7df" />
+              {/* Background solid grid lines and minor axis tick marks */}
+              <Customized
+                key="chart-background-grid"
+                component={(chartProps: unknown) => {
+                  const chartState = chartProps as GuideChartState;
+                  const yAxisMap = chartState?.yAxisMap ?? {};
+                  const plotLeft =
+                    asNumber(chartState?.offset?.left) ??
+                    (activeFrame?.plotLeft ?? axisPlotLeft);
+                  const plotTop =
+                    asNumber(chartState?.offset?.top) ??
+                    (activeFrame?.plotTop ?? axisPlotTop);
+                  const plotWidth =
+                    asNumber(chartState?.offset?.width) ??
+                    (activeFrame?.plotWidth ?? 0);
+                  const plotHeight =
+                    asNumber(chartState?.offset?.height) ??
+                    (activeFrame?.plotHeight ?? axisPlotHeight);
+                  const plotRight = plotLeft + plotWidth;
+                  const plotBottom = plotTop + plotHeight;
+
+                  const primaryGroup = axisLayout.groups[0];
+                  const primaryYAxis = primaryGroup
+                    ? (yAxisMap[primaryGroup.axisId] as
+                        | { scale?: (val: number) => number }
+                        | undefined)
+                    : undefined;
+                  const primaryScale = primaryYAxis?.scale;
+
+                  return (
+                    <g className="recharts-custom-background-grid">
+                      {/* Minor grid horizontal solid lines */}
+                      {primaryGroup?.minorTicks.map((val, idx) => {
+                        const y =
+                          typeof primaryScale === "function"
+                            ? primaryScale(val)
+                            : valueToPixel(
+                                val,
+                                primaryGroup.domain,
+                                plotTop,
+                                plotHeight,
+                              );
+
+                        if (y < plotTop - 0.5 || y > plotBottom + 0.5) {
+                          return null;
+                        }
+
+                        return (
+                          <line
+                            key={`grid-minor-${idx}`}
+                            x1={plotLeft}
+                            y1={y}
+                            x2={plotRight}
+                            y2={y}
+                            stroke={MINOR_GRID_STROKE}
+                            strokeWidth={1}
+                          />
+                        );
+                      })}
+
+                      {/* Major grid horizontal solid lines */}
+                      {primaryGroup?.ticks.map((val, idx) => {
+                        const y =
+                          typeof primaryScale === "function"
+                            ? primaryScale(val)
+                            : valueToPixel(
+                                val,
+                                primaryGroup.domain,
+                                plotTop,
+                                plotHeight,
+                              );
+
+                        if (y < plotTop - 0.5 || y > plotBottom + 0.5) {
+                          return null;
+                        }
+
+                        return (
+                          <line
+                            key={`grid-major-${idx}`}
+                            x1={plotLeft}
+                            y1={y}
+                            x2={plotRight}
+                            y2={y}
+                            stroke={MAJOR_GRID_STROKE}
+                            strokeWidth={1}
+                          />
+                        );
+                      })}
+
+                      {/* Minor tick marks on every Y-axis */}
+                      {axisLayout.groups.map((group) => {
+                        const yAxisObj = yAxisMap[group.axisId] as
+                          | { scale?: (val: number) => number }
+                          | undefined;
+                        const axisScale = yAxisObj?.scale;
+                        const axisLineX =
+                          plotLeft - group.sideIndex * axisWidth;
+
+                        return (
+                          <g key={`minor-ticks-group-${group.axisId}`}>
+                            {group.minorTicks.map((val, idx) => {
+                              const y =
+                                typeof axisScale === "function"
+                                  ? axisScale(val)
+                                  : valueToPixel(
+                                      val,
+                                      group.domain,
+                                      plotTop,
+                                      plotHeight,
+                                    );
+
+                              if (y < plotTop - 0.5 || y > plotBottom + 0.5) {
+                                return null;
+                              }
+
+                              return (
+                                <line
+                                  key={`minor-tick-${group.axisId}-${idx}`}
+                                  x1={axisLineX}
+                                  y1={y}
+                                  x2={axisLineX - 3.5 * scale}
+                                  y2={y}
+                                  stroke={AXIS_STROKE}
+                                  strokeWidth={0.9 * scale}
+                                  strokeOpacity={0.6}
+                                />
+                              );
+                            })}
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }}
+              />
               <XAxis
                 dataKey="date"
                 interval="preserveStartEnd"
-                minTickGap={28 * scale}
-                tickFormatter={(value) => formatXAxisDate(String(value))}
+                minTickGap={resolvedXMinTickGap * scale}
+                tickFormatter={(value) => resolvedXTickFormatter(String(value))}
                 tick={{ fontSize: tickFontSize, fill: AXIS_STROKE }}
                 tickLine={{ stroke: AXIS_STROKE }}
                 axisLine={{ stroke: AXIS_STROKE }}
@@ -949,9 +1115,8 @@ export function TimeSeriesChart({
                   tickLine={{ stroke: AXIS_STROKE }}
                   axisLine={{ stroke: AXIS_STROKE }}
                   domain={[group.domain[0], group.domain[1]]}
-                  tickCount={
-                    axisTickCounts[group.axisId] ?? DEFAULT_AXIS_TICK_COUNT
-                  }
+                  ticks={group.ticks}
+                  tickFormatter={formatAxisTick}
                   allowDataOverflow
                 />
               ))}
@@ -971,7 +1136,7 @@ export function TimeSeriesChart({
                       }
                       type="monotone"
                       dataKey={series.key}
-                      name={`${series.testName} / ${series.objectLabel}`}
+                      name={composeSeriesName(series.testName, series.objectLabel)}
                       stroke={series.color}
                       dot={false}
                       isAnimationActive
@@ -1019,7 +1184,9 @@ export function TimeSeriesChart({
                   label={(props: GuideLabelProps) =>
                     renderVerticalGuideLabel(
                       props,
-                      formatGuideDate(activeGuide.date),
+                      xTickFormatter
+                        ? xTickFormatter(activeGuide.date)
+                        : formatGuideDate(activeGuide.date),
                     )
                   }
                 />
@@ -1041,7 +1208,9 @@ export function TimeSeriesChart({
                   />
                 ))}
 
+              {/* Foreground interactive hover guide overlay */}
               <Customized
+                key="chart-hover-guides"
                 component={(chartProps: unknown) => {
                   if (!activeGuide || !activeFrame) {
                     return null;
@@ -1050,11 +1219,14 @@ export function TimeSeriesChart({
                   const chartState = chartProps as GuideChartState;
                   const yAxisMap = chartState?.yAxisMap ?? {};
                   const plotLeft =
-                    asNumber(chartState?.offset?.left) ?? activeFrame.plotLeft;
+                    asNumber(chartState?.offset?.left) ??
+                    activeFrame.plotLeft;
                   const plotTop =
-                    asNumber(chartState?.offset?.top) ?? activeFrame.plotTop;
+                    asNumber(chartState?.offset?.top) ??
+                    activeFrame.plotTop;
                   const plotWidth =
-                    asNumber(chartState?.offset?.width) ?? activeFrame.plotWidth;
+                    asNumber(chartState?.offset?.width) ??
+                    activeFrame.plotWidth;
                   const plotHeight =
                     asNumber(chartState?.offset?.height) ??
                     activeFrame.plotHeight;
@@ -1066,7 +1238,7 @@ export function TimeSeriesChart({
                   );
 
                   return (
-                    <g>
+                    <g className="recharts-customized-guide-elements">
                       {activeGuideSpecs.map((guide) => {
                         const axisGroup = axisLayout.groups.find(
                           (item) => item.axisId === guide.axisId,
@@ -1086,7 +1258,8 @@ export function TimeSeriesChart({
                           return null;
                         }
 
-                        const axisLineX = plotLeft - axisGroup.sideIndex * axisWidth;
+                        const axisLineX =
+                          plotLeft - axisGroup.sideIndex * axisWidth;
                         const textLabel = formatGuideValue(guide.value);
                         const textX = axisLineX - 1 * scale;
                         const textY = clamp(
@@ -1157,12 +1330,6 @@ export function TimeSeriesChart({
             {axisLayout.groups.map((group) => {
               const axisLineX = axisPlotLeft - group.sideIndex * axisWidth;
               const isVisible = hoveredAxisId === group.axisId;
-              const canIncrease =
-                (axisTickCounts[group.axisId] ?? DEFAULT_AXIS_TICK_COUNT) <
-                MAX_AXIS_TICK_COUNT;
-              const canDecrease =
-                (axisTickCounts[group.axisId] ?? DEFAULT_AXIS_TICK_COUNT) >
-                MIN_AXIS_TICK_COUNT;
 
               return (
                 <div
@@ -1185,38 +1352,49 @@ export function TimeSeriesChart({
                     type="button"
                     className={`absolute left-1/2 flex -translate-x-1/2 items-center justify-center rounded border border-ink/30 bg-white/95 text-ink/80 shadow-sm transition ${
                       isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-                    } ${canIncrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
+                    } ${group.canIncrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
                     style={{
                       top: axisControlInset,
                       width: axisControlButtonSize,
                       height: axisControlButtonSize,
                     }}
-                    title="Increase scale granularity"
-                    disabled={!canIncrease}
+                    title={`Увеличить число делений (сейчас: ${group.divisionsCount} делений, шаг: ${formatStepValue(group.step)}; Shift+клик: +3)`}
+                    disabled={!group.canIncrease}
                     onMouseDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      adjustAxisTickDensity(group.axisId, 1);
+                      adjustAxisDensity(group.axisId, event.shiftKey ? 3 : 1);
                     }}
                   >
                     <ChevronUp style={{ width: 12 * scale, height: 12 * scale }} />
                   </button>
+                  <div
+                    className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded border border-ink/25 bg-white/95 px-1 py-0.5 text-center font-mono font-medium text-ink/80 shadow-sm transition select-none ${
+                      isVisible ? "opacity-100" : "pointer-events-none opacity-0"
+                    }`}
+                    style={{
+                      fontSize: Math.max(9, Math.round(9 * scale)),
+                    }}
+                    title={`Делений шкалы: ${group.divisionsCount} (шаг ${formatStepValue(group.step)})`}
+                  >
+                    {group.divisionsCount}
+                  </div>
                   <button
                     type="button"
                     className={`absolute left-1/2 flex -translate-x-1/2 items-center justify-center rounded border border-ink/30 bg-white/95 text-ink/80 shadow-sm transition ${
                       isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-                    } ${canDecrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
+                    } ${group.canDecrease ? "hover:bg-white hover:text-ink" : "cursor-not-allowed opacity-35"}`}
                     style={{
                       bottom: axisControlInset,
                       width: axisControlButtonSize,
                       height: axisControlButtonSize,
                     }}
-                    title="Decrease scale granularity"
-                    disabled={!canDecrease}
+                    title={`Уменьшить число делений (сейчас: ${group.divisionsCount} делений, шаг: ${formatStepValue(group.step)}; Shift+клик: -3)`}
+                    disabled={!group.canDecrease}
                     onMouseDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      adjustAxisTickDensity(group.axisId, -1);
+                      adjustAxisDensity(group.axisId, event.shiftKey ? -3 : -1);
                     }}
                   >
                     <ChevronDown style={{ width: 12 * scale, height: 12 * scale }} />
@@ -1291,7 +1469,7 @@ export function TimeSeriesChart({
                           : 'border border-transparent text-ink/75 hover:border-ink/15 hover:bg-white'
                       }`}
                       style={{ gap: 6 * scale, borderRadius: 3 * scale }}
-                      title={`${item.testName} / ${item.objectLabel}${isHidden ? ' (скрыто)' : ''}`}
+                      title={`${composeSeriesName(item.testName, item.objectLabel)}${isHidden ? ' (скрыто)' : ''}`}
                       onClick={() =>
                         setHiddenSeriesKeys((prev) => {
                           const next = new Set(prev);
@@ -1315,7 +1493,7 @@ export function TimeSeriesChart({
                         }}
                       />
                       <span className="truncate" style={{ maxWidth: 280 * scale }}>
-                        {item.testName} / {item.objectLabel}
+                        {composeSeriesName(item.testName, item.objectLabel)}
                       </span>
                     </div>
                   );
@@ -1381,6 +1559,15 @@ function ChartMessage({
       {children}
     </div>
   );
+}
+
+/**
+ * "<параметр> / <объект>", or just the parameter when the dataset has no
+ * meaningful object to name — retrospective data is one sampling point per
+ * sheet and carries a blank object label (see `RETRO_OBJECT_KEY`).
+ */
+function composeSeriesName(testName: string, objectLabel: string): string {
+  return objectLabel.trim() ? `${testName} / ${objectLabel}` : testName;
 }
 
 function getSeriesKey(testId: number, objectKey: string): string {
@@ -1581,27 +1768,151 @@ function rowsHaveNumericValue(rows: ChartRow[], key: string): boolean {
   return rows.some((row) => toNullableNumber(row[key]) !== null);
 }
 
-function buildNiceDomain(min: number, max: number): [number, number] {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) {
-    return [0, 1];
+function resolveAxisScale(
+  rawMin: number,
+  rawMax: number,
+  offset: number,
+): {
+  domain: [number, number];
+  ticks: number[];
+  minorTicks: number[];
+  step: number;
+  divisionsCount: number;
+  canIncrease: boolean;
+  canDecrease: boolean;
+} {
+  if (!Number.isFinite(rawMin) || !Number.isFinite(rawMax)) {
+    return {
+      domain: [0, 1],
+      ticks: [0, 0.5, 1],
+      minorTicks: [0.25, 0.75],
+      step: 0.5,
+      divisionsCount: 2,
+      canIncrease: false,
+      canDecrease: false,
+    };
   }
 
+  let min = rawMin;
+  let max = rawMax;
   if (min === max) {
     const pad = Math.max(Math.abs(min) * 0.1, 1);
     min -= pad;
     max += pad;
   }
 
-  const baseline = min >= 0 ? 0 : min;
+  const baseline = min >= 0 && min < max * 0.5 ? 0 : min;
   const span = Math.max(max - baseline, Number.EPSILON);
-  const step = niceStep(span / 6);
-  const niceMin = Math.floor(baseline / step) * step;
-  const niceMax = Math.ceil(max / step) * step;
+
+  // Generate candidate nice steps from coarse to fine
+  const rawExponent = Math.floor(Math.log10(span));
+  const candidateSteps: number[] = [];
+
+  for (let exp = rawExponent + 1; exp >= rawExponent - 3; exp -= 1) {
+    const base = 10 ** exp;
+    for (const m of [5, 2.5, 2, 1]) {
+      const step = Number.parseFloat((m * base).toPrecision(12));
+      const count = span / step;
+      if (step > 0 && count >= 2 && count <= 60 && !candidateSteps.includes(step)) {
+        candidateSteps.push(step);
+      }
+    }
+  }
+
+  if (candidateSteps.length === 0) {
+    candidateSteps.push(niceStep(span / 8));
+  }
+
+  // Find default step that yields around 6-10 divisions
+  let defaultIndex = candidateSteps.findIndex((s) => span / s >= 6);
+  if (defaultIndex === -1) {
+    defaultIndex = Math.floor(candidateSteps.length / 2);
+  }
+
+  const maxLevelIndex = candidateSteps.length - 1;
+  const levelIndex = clamp(defaultIndex + offset, 0, maxLevelIndex);
+  const step = candidateSteps[levelIndex]!;
+
+  const { domain, ticks, minorTicks } = buildTicksForStep(baseline, max, step);
+
+  return {
+    domain,
+    ticks,
+    minorTicks,
+    step,
+    divisionsCount: Math.max(1, ticks.length - 1),
+    canIncrease: levelIndex < maxLevelIndex,
+    canDecrease: levelIndex > 0,
+  };
+}
+
+function buildTicksForStep(
+  baseline: number,
+  max: number,
+  step: number,
+): { domain: [number, number]; ticks: number[]; minorTicks: number[] } {
+  const niceMin = Number.parseFloat((Math.floor(baseline / step) * step).toPrecision(12));
+  let niceMax = Number.parseFloat((Math.ceil(max / step) * step).toPrecision(12));
 
   if (niceMax <= niceMin) {
-    return [niceMin, niceMin + step];
+    niceMax = Number.parseFloat((niceMin + step).toPrecision(12));
   }
-  return [niceMin, niceMax];
+
+  const count = Math.min(80, Math.max(1, Math.round((niceMax - niceMin) / step)));
+  const ticks: number[] = [];
+  for (let i = 0; i <= count; i += 1) {
+    ticks.push(Number.parseFloat((niceMin + i * step).toPrecision(12)));
+  }
+
+  const subdivisions = getSubdivisionsForStep(step);
+  const minorTicks: number[] = [];
+  if (subdivisions > 1) {
+    const subStep = step / subdivisions;
+    for (let i = 0; i < ticks.length - 1; i += 1) {
+      const t0 = ticks[i];
+      for (let k = 1; k < subdivisions; k += 1) {
+        minorTicks.push(Number.parseFloat((t0 + k * subStep).toPrecision(12)));
+      }
+    }
+  }
+
+  return {
+    domain: [niceMin, niceMax],
+    ticks,
+    minorTicks,
+  };
+}
+
+function getSubdivisionsForStep(step: number): number {
+  const safeStep = Math.abs(step);
+  if (safeStep < Number.EPSILON) {
+    return 1;
+  }
+
+  const exponent = Math.floor(Math.log10(safeStep));
+  const base = 10 ** exponent;
+  const fraction = safeStep / base;
+
+  if (Math.abs(fraction - 1) < 0.15) return 5;
+  if (Math.abs(fraction - 2) < 0.15) return 4;
+  if (Math.abs(fraction - 2.5) < 0.15) return 5;
+  if (Math.abs(fraction - 5) < 0.15) return 5;
+  return 2;
+}
+
+function formatAxisTick(value: unknown): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return "";
+  }
+  return Number(num.toPrecision(10)).toString();
+}
+
+function formatStepValue(step: number): string {
+  if (!Number.isFinite(step)) {
+    return "";
+  }
+  return Number(Number(step).toPrecision(6)).toString();
 }
 
 function niceStep(target: number): number {

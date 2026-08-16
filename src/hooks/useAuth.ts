@@ -6,10 +6,12 @@ import { AUTH_BYPASS_CREDENTIALS, AUTH_BYPASS_ENABLED } from '@/lib/app-config';
 import { api } from '@/lib/tauri-api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useDataStore } from '@/stores/data-store';
+import { useRetroDataStore } from '@/stores/retro-data-store';
 
 export function useAuth() {
   const { session, isLoading, error, setSession, setLoading, setError, clear } = useAuthStore();
   const resetData = useDataStore((state) => state.resetData);
+  const resetRetroData = useRetroDataStore((state) => state.resetRetroData);
   const bypassAttemptedRef = useRef(false);
 
   const login = useCallback(
@@ -48,8 +50,9 @@ export function useAuth() {
     } finally {
       clear();
       resetData();
+      resetRetroData();
     }
-  }, [clear, resetData, session]);
+  }, [clear, resetData, resetRetroData, session]);
 
   return {
     session,

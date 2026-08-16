@@ -40,6 +40,17 @@ export function formatNumber(value: number | null | undefined, digits = 3): stri
   return value.toFixed(digits);
 }
 
+/**
+ * Same formatting as `formatNumber`, but with a comma decimal separator.
+ * Use this for values placed on the clipboard (not for on-screen display) —
+ * lab staff paste these straight into Excel report forms that expect a
+ * comma-decimal locale, otherwise pasted numbers are read as text and break
+ * downstream formulas.
+ */
+export function formatNumberForCopy(value: number | null | undefined, digits = 3): string {
+  return formatNumber(value, digits).replace('.', ',');
+}
+
 export function toIsoDate(value: Date | string | null | undefined): string | null {
   if (!value) {
     return null;
