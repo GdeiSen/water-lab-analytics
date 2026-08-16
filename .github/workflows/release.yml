@@ -96,9 +96,9 @@ jobs:
           WLA_LICENSE_API_URL: ${{ secrets.WLA_LICENSE_API_URL }}
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            npx tauri build --bundles none --target ${{ matrix.target }}
+            npx tauri build --no-bundle --target ${{ matrix.target }}
           else
-            npx tauri build --bundles none
+            npx tauri build --no-bundle
           fi
 
       - name: Collect portable binary

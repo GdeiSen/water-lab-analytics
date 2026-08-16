@@ -13,7 +13,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:portable": "tauri build --bundles none",
+    "tauri:portable": "tauri build --no-bundle",
     "license:keypair": "node scripts/license-keypair.mjs",
     "license:generate": "node scripts/generate-license.mjs",
     "license:hash-key": "node scripts/hash-license-key.mjs"
