@@ -842,8 +842,8 @@ export default function Page() {
   return (
     <AuthProvider>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f1f3f5] p-3">
-        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border border-ink/20 bg-white px-4 py-3">
-          <div className="flex h-full flex-wrap items-center gap-3">
+        <header className="mb-3 flex shrink-0 items-start justify-between gap-2 border border-ink/20 bg-white px-4 py-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
             <ModeSwitcher mode={activeMode} onChange={setActiveMode} />
             <h1 className="text-lg font-semibold text-ink">
               {activeMode === "daily"
@@ -852,7 +852,7 @@ export default function Page() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <InterfaceSettingsMenu />
             {!authBypassEnabled && (
               <Button variant="danger" onClick={logout}>

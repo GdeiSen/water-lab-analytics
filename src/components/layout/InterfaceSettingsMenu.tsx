@@ -43,12 +43,14 @@ export function InterfaceSettingsMenu() {
   const [open, setOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [settings, setSettings] = useState<InterfaceSettings>(defaultSettings);
+  const [loaded, setLoaded] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (!saved) {
+        setLoaded(true);
         return;
       }
 
@@ -67,17 +69,39 @@ export function InterfaceSettingsMenu() {
     } catch {
       setSettings(defaultSettings);
     }
+    setLoaded(true);
+  }, []);
+
+  // Emergency reset: Ctrl/Cmd+0 always restores the default scale, even if the menu is out of reach.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key === '0') {
+        event.preventDefault();
+        setSettings((current) => ({ ...current, scale: 'normal' }));
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
+    if (!loaded) {
+      return;
+    }
+
     const root = document.documentElement;
     root.classList.toggle('ui-theme-white', settings.theme === 'white');
     root.classList.toggle('ui-bold-font', settings.boldText);
     root.style.fontSize = `${scaleValues[settings.scale]}px`;
     root.style.setProperty('--ui-scale', String(scaleMultipliers[settings.scale]));
 
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Storage may be unavailable; the scale still applies for this session.
+    }
+  }, [settings, loaded]);
 
   useEffect(() => {
     if (!open) {
@@ -117,7 +141,7 @@ export function InterfaceSettingsMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-50 w-72 border border-ink/25 bg-white p-3 text-sm text-ink shadow-panel">
+        <div className="absolute right-0 top-11 z-50 w-72 max-w-[calc(100vw-1.5rem)] border border-ink/25 bg-white p-3 text-sm text-ink shadow-panel">
           <div className="mb-3 flex items-center gap-2 border-b border-ink/15 pb-2 font-semibold">
             <Settings className="h-4 w-4" />
             Интерфейс
